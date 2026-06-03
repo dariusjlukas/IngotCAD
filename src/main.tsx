@@ -1,7 +1,13 @@
 import { createRoot } from 'react-dom/client'
 import * as THREE from 'three'
+import { config } from '@fortawesome/fontawesome-svg-core'
+import '@fortawesome/fontawesome-svg-core/styles.css'
 import './index.css'
 import App from './App'
+
+// FontAwesome injects its CSS itself by default, which flashes oversized icons
+// before it lands. Import the stylesheet statically and disable the auto-inject.
+config.autoAddCss = false
 
 // 3D printing is intrinsically Z-up (bed = XY plane, build height = Z). Make
 // Z-up the law of the land before anything renders so cameras, OrbitControls

@@ -6,6 +6,8 @@ import {
   ensureCCW,
   makeCircle,
   makeRectangle,
+  niceStep,
+  pointInPolygon,
   signedArea,
 } from './geometry'
 import type { Vec2 } from '../document/types'
@@ -78,5 +80,23 @@ describe('sketch geometry', () => {
     const cleaned = cleanContours([good, tooFew])
     expect(cleaned).toHaveLength(1)
     expect(signedArea(cleaned[0])).toBeGreaterThan(0)
+  })
+
+  it('pointInPolygon detects inside vs outside', () => {
+    const square: Vec2[] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ]
+    expect(pointInPolygon(square, [5, 5])).toBe(true)
+    expect(pointInPolygon(square, [15, 5])).toBe(false)
+    expect(pointInPolygon(square, [-1, 5])).toBe(false)
+  })
+
+  it('niceStep picks 1/2/5×10ⁿ steps for ~20 divisions', () => {
+    expect(niceStep(240)).toBe(20)
+    expect(niceStep(20)).toBe(1)
+    expect(niceStep(2000)).toBe(100)
   })
 })

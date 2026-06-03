@@ -1,12 +1,15 @@
 /** The outliner: a tree of the document's nodes with selection + visibility. */
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
+import { faCube, faObjectGroup, faShapes, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
 import { useCadStore } from '../document/store'
 import type { CadNode, NodeId } from '../document/types'
 import { hasChildren } from '../document/types'
 
-const KIND_GLYPH: Record<CadNode['kind'], string> = {
-  primitive: '◆',
-  group: '▦',
-  boolean: '∮',
+const KIND_ICON: Record<CadNode['kind'], IconDefinition> = {
+  primitive: faCube,
+  group: faObjectGroup,
+  boolean: faShapes,
 }
 
 function ObjectRow({ id, depth }: { id: NodeId; depth: number }) {
@@ -28,8 +31,8 @@ function ObjectRow({ id, depth }: { id: NodeId; depth: number }) {
         }
         style={{ paddingLeft: 8 + depth * 14 }}
       >
-        <span className="w-3 shrink-0 text-neutral-500" style={{ color: node.color }}>
-          {KIND_GLYPH[node.kind]}
+        <span className="flex w-4 shrink-0 justify-center text-neutral-500" style={{ color: node.color }}>
+          <FontAwesomeIcon icon={KIND_ICON[node.kind]} fixedWidth />
         </span>
         <span className="flex-1 truncate">{node.name}</span>
         {node.role === 'hole' && (
@@ -44,7 +47,7 @@ function ObjectRow({ id, depth }: { id: NodeId; depth: number }) {
           }}
           className="shrink-0 px-0.5 text-neutral-500 hover:text-neutral-200"
         >
-          {node.visible ? '👁' : '⊘'}
+          <FontAwesomeIcon icon={node.visible ? faEye : faEyeSlash} fixedWidth />
         </button>
       </div>
       {hasChildren(node) &&

@@ -1,6 +1,8 @@
 /** The main command bar: create, transform-mode, combine, edit, and file I/O. */
 import { useRef } from 'react'
 import type { ReactNode } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faCube, faDatabase, faCircle, faPencil } from '@fortawesome/free-solid-svg-icons'
 import { useCadStore } from '../document/store'
 import { selectCanRedo, selectCanUndo, selectSingleSelected } from '../document/selectors'
 import { useViewportStore } from '../viewport/viewportStore'
@@ -89,10 +91,18 @@ export function Toolbar() {
       </span>
 
       <Group>
-        <Btn onClick={() => addPrimitive('box')} title="Add a box">＋ Box</Btn>
-        <Btn onClick={() => addPrimitive('cylinder')} title="Add a cylinder">＋ Cylinder</Btn>
-        <Btn onClick={() => addPrimitive('sphere')} title="Add a sphere">＋ Sphere</Btn>
-        <Btn onClick={() => openSketch()} title="Sketch a 2D profile and extrude it">✎ Sketch</Btn>
+        <Btn onClick={() => addPrimitive('box')} title="Add a box">
+          <FontAwesomeIcon icon={faCube} fixedWidth /> Box
+        </Btn>
+        <Btn onClick={() => addPrimitive('cylinder')} title="Add a cylinder">
+          <FontAwesomeIcon icon={faDatabase} fixedWidth /> Cylinder
+        </Btn>
+        <Btn onClick={() => addPrimitive('sphere')} title="Add a sphere">
+          <FontAwesomeIcon icon={faCircle} fixedWidth /> Sphere
+        </Btn>
+        <Btn onClick={() => openSketch()} title="Sketch a 2D profile and extrude it">
+          <FontAwesomeIcon icon={faPencil} fixedWidth /> Sketch
+        </Btn>
       </Group>
 
       <Divider />

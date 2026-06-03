@@ -67,3 +67,22 @@ export function distance(a: Vec2, b: Vec2): number {
 export function cleanContours(contours: Vec2[][]): Vec2[][] {
   return contours.filter((c) => c.length >= 3 && Math.abs(signedArea(c)) > 1e-3).map(ensureCCW)
 }
+
+/** Ray-casting point-in-polygon test (for shape hit-testing). */
+export function pointInPolygon(poly: Vec2[], p: Vec2): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i]
+    const [xj, yj] = poly[j]
+    const crosses = yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi
+    if (crosses) inside = !inside
+  }
+  return inside
+}
+
+/** A "nice" grid step (1/2/5 × 10ⁿ) giving roughly `targetDivisions` lines across `span`. */
+export function niceStep(span: number, targetDivisions = 20): number {
+  const raw = span / targetDivisions
+  const candidates = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000]
+  return candidates.find((c) => c >= raw) ?? 2000
+}
