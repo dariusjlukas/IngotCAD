@@ -26,7 +26,6 @@ export function Viewport() {
 
       {/* Build plate on the XY plane (grid is XZ by default → rotate onto XY). */}
       <gridHelper args={[400, 40, '#46506b', '#262a33']} rotation={[Math.PI / 2, 0, 0]} />
-      <axesHelper args={[40]} />
 
       <CadScene />
 
