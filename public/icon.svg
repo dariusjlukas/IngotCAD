@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="#15161b"/>
+  <g transform="translate(256 268)">
+    <!-- isometric cube -->
+    <polygon points="0,-150 150,-65 0,20 -150,-65" fill="#6ea8fe"/>
+    <polygon points="0,20 150,-65 150,105 0,190" fill="#3f74c9"/>
+    <polygon points="0,20 -150,-65 -150,105 0,190" fill="#2b5394"/>
+  </g>
+</svg>
