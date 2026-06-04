@@ -90,7 +90,14 @@ function usePreviewGeometry(pending: PendingOp | null): THREE.BufferGeometry | n
       transform: IDENTITY_TRANSFORM,
       params,
     }
-    const doc: CadDocument = { schemaVersion: 1, units: 'mm', nodes: { preview: node }, rootIds: ['preview'], assets: {} }
+    const doc: CadDocument = {
+      schemaVersion: 1,
+      units: 'mm',
+      nodes: { preview: node },
+      rootIds: ['preview'],
+      assets: {},
+      featureOrder: ['preview'],
+    }
     let cancelled = false
     engine.computeMesh(doc, 'preview').then((raw) => {
       if (cancelled) return

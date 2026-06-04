@@ -1,56 +1,36 @@
 /**
- * Constraint-based sketch model. Geometry is defined by shared points; shapes
- * (closed loops, circles) reference points; constraints relate points. A solver
- * (solver.ts) adjusts point positions to satisfy the constraints. On commit the
- * solved points become contours fed to the (unchanged) Manifold extrude path.
+ * Constraint-based sketch behavior. The sketch *data types* now live in
+ * document/types (so a sketch-based solid can store its editable source on the
+ * node); this module re-exports them and provides the behavior: contour
+ * extraction, segment/constraint helpers, etc.
  *
  * Segments are not first-class — a "segment" is just a pair of point ids (an
- * edge of a loop), which keeps contour extraction trivial (loops are explicit
- * ordered point lists) while still allowing edge-level constraints.
+ * edge of a loop), which keeps contour extraction trivial.
  */
-import type { Vec2 } from '../document/types'
+import type {
+  Constraint,
+  ConstraintKind,
+  PointId,
+  ShapeId,
+  SketchData,
+  SPoint,
+  Vec2,
+} from '../document/types'
 import { ensureCCW, makeCircle } from './geometry'
 
-export type PointId = string
-export type ShapeId = string
-export type ConstraintId = string
-
-export interface SPoint {
-  x: number
-  y: number
-  /** Anchored points are never moved by the solver. */
-  fixed: boolean
-}
-
-export type Shape =
-  | { id: ShapeId; kind: 'loop'; pts: PointId[] }
-  | { id: ShapeId; kind: 'circle'; c: PointId; r: number }
-
-export type ConstraintKind =
-  | 'coincident'
-  | 'horizontal'
-  | 'vertical'
-  | 'distance'
-  | 'equal'
-  | 'parallel'
-  | 'perpendicular'
-
-export type Constraint =
-  | { id: ConstraintId; kind: 'coincident'; a: PointId; b: PointId }
-  | { id: ConstraintId; kind: 'horizontal'; a: PointId; b: PointId }
-  | { id: ConstraintId; kind: 'vertical'; a: PointId; b: PointId }
-  // `offset` is display-only: the signed perpendicular distance (mm) at which
-  // the dimension line is drawn. The solver ignores it.
-  | { id: ConstraintId; kind: 'distance'; a: PointId; b: PointId; value: number; offset?: number }
-  | { id: ConstraintId; kind: 'equal'; a: PointId; b: PointId; c: PointId; d: PointId }
-  | { id: ConstraintId; kind: 'parallel'; a: PointId; b: PointId; c: PointId; d: PointId }
-  | { id: ConstraintId; kind: 'perpendicular'; a: PointId; b: PointId; c: PointId; d: PointId }
-
-export interface SketchData {
-  points: Record<PointId, SPoint>
-  shapes: Shape[]
-  constraints: Constraint[]
-}
+// Canonical home of these types is document/types; re-export so existing
+// imports from './model' keep working.
+export type {
+  Constraint,
+  ConstraintInput,
+  ConstraintKind,
+  PointId,
+  ShapeId,
+  ConstraintId,
+  SketchData,
+  SPoint,
+} from '../document/types'
+export type { SketchShape as Shape } from '../document/types'
 
 /** Segments used to facet a circle for extrusion. */
 export const CIRCLE_SEGMENTS = 64
@@ -118,11 +98,6 @@ export function pointPos(data: SketchData, id: PointId): Vec2 {
   const p = data.points[id]
   return p ? [p.x, p.y] : [0, 0]
 }
-
-/** Distributes Omit over a union so discriminant-specific fields survive. */
-export type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never
-/** A constraint minus its id, for creation. */
-export type ConstraintInput = DistributiveOmit<Constraint, 'id'>
 
 export function shapeIdOfPoint(data: SketchData, pid: PointId): ShapeId | null {
   for (const s of data.shapes) {

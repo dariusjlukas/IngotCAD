@@ -2,9 +2,15 @@ import { beforeEach, describe, it, expect } from 'vitest'
 import { useOperationStore } from './operationStore'
 import { useCadStore } from '../document/store'
 import { IDENTITY_TRANSFORM } from '../document/types'
+import type { SketchSource } from '../document/types'
 
 const op = () => useOperationStore.getState()
 const cad = () => useCadStore.getState()
+
+const SRC: SketchSource = {
+  data: { points: {}, shapes: [], constraints: [] },
+  plane: { origin: [0, 0, 0], u: [1, 0, 0], v: [0, 1, 0], n: [0, 0, 1] },
+}
 
 beforeEach(() => {
   cad().newDocument()
@@ -27,6 +33,7 @@ describe('operation store', () => {
       segments: 64,
       value: 5,
       flip: false,
+      sketch: SRC,
     })
     op().setValue(8)
     expect(op().pending?.value).toBe(8)
@@ -54,6 +61,7 @@ describe('operation store', () => {
       segments: 64,
       value: 180,
       flip: false,
+      sketch: SRC,
     })
     op().cancel()
     expect(op().pending).toBeNull()
@@ -68,13 +76,13 @@ describe('operation store', () => {
         [1, 1],
       ],
     ]
-    op().start({ mode: 'extrude', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: -5, flip: false })
+    op().start({ mode: 'extrude', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: -5, flip: false, sketch: SRC })
     expect(op().pending?.value).toBeCloseTo(0.1)
     op().setValue(999)
     expect(op().pending?.value).toBe(999) // extrude has no upper clamp
 
     op().cancel()
-    op().start({ mode: 'revolve', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: 999, flip: false })
+    op().start({ mode: 'revolve', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: 999, flip: false, sketch: SRC })
     expect(op().pending?.value).toBe(360)
   })
 
@@ -86,7 +94,7 @@ describe('operation store', () => {
         [1, 1],
       ],
     ]
-    op().start({ mode: 'extrude', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: 5, flip: false })
+    op().start({ mode: 'extrude', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: 5, flip: false, sketch: SRC })
     op().setSignedValue(-12)
     expect(op().pending?.flip).toBe(true)
     expect(op().pending?.value).toBe(12)

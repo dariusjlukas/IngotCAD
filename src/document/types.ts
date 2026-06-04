@@ -29,6 +29,70 @@ export const IDENTITY_TRANSFORM: Transform = {
   scale: [1, 1, 1],
 }
 
+// ---------------------------------------------------------------------------
+// Sketch data. Lives here (the data layer) so sketch-based solids can store
+// their editable source on the node. The sketch *behavior* (solver, contour
+// extraction, plane math) lives in src/sketch/, which imports these types.
+// ---------------------------------------------------------------------------
+
+export type PointId = string
+export type ShapeId = string
+export type ConstraintId = string
+
+export interface SPoint {
+  x: number
+  y: number
+  /** Anchored points are never moved by the solver. */
+  fixed: boolean
+}
+
+export type SketchShape =
+  | { id: ShapeId; kind: 'loop'; pts: PointId[] }
+  | { id: ShapeId; kind: 'circle'; c: PointId; r: number }
+
+export type ConstraintKind =
+  | 'coincident'
+  | 'horizontal'
+  | 'vertical'
+  | 'distance'
+  | 'equal'
+  | 'parallel'
+  | 'perpendicular'
+
+export type Constraint =
+  | { id: ConstraintId; kind: 'coincident'; a: PointId; b: PointId }
+  | { id: ConstraintId; kind: 'horizontal'; a: PointId; b: PointId }
+  | { id: ConstraintId; kind: 'vertical'; a: PointId; b: PointId }
+  | { id: ConstraintId; kind: 'distance'; a: PointId; b: PointId; value: number; offset?: number }
+  | { id: ConstraintId; kind: 'equal'; a: PointId; b: PointId; c: PointId; d: PointId }
+  | { id: ConstraintId; kind: 'parallel'; a: PointId; b: PointId; c: PointId; d: PointId }
+  | { id: ConstraintId; kind: 'perpendicular'; a: PointId; b: PointId; c: PointId; d: PointId }
+
+export interface SketchData {
+  points: Record<PointId, SPoint>
+  shapes: SketchShape[]
+  constraints: Constraint[]
+}
+
+export type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never
+export type ConstraintInput = DistributiveOmit<Constraint, 'id'>
+
+export type PlaneKind = 'xy' | 'xz' | 'yz'
+
+/** An oriented 2D frame embedded in world space (origin + U/V/N basis). */
+export interface SketchPlane {
+  origin: Vec3
+  u: Vec3
+  v: Vec3
+  n: Vec3
+}
+
+/** The editable source of a sketch-based solid: the sketch and the plane it's on. */
+export interface SketchSource {
+  data: SketchData
+  plane: SketchPlane
+}
+
 /** Primitive shape parameters. The discriminant `type` selects the shape. */
 export type PrimitiveParams =
   | { type: 'box'; size: Vec3 }
@@ -44,10 +108,11 @@ export type PrimitiveParams =
   // A 2D sketch extruded along Z. `profile` is a set of closed contours
   // (each a list of [x,y] points in mm, CCW-wound), extruded by `height`.
   // `flip` extrudes toward -Z (the other side of the plane) instead of +Z.
-  | { type: 'extrusion'; profile: Vec2[][]; height: number; flip?: boolean }
+  // `sketch` (optional) is the editable source the profile was solved from.
+  | { type: 'extrusion'; profile: Vec2[][]; height: number; flip?: boolean; sketch?: SketchSource }
   // A 2D sketch revolved around the Y axis (x=0) by `degrees`; that axis
   // becomes the solid's Z axis (a lathe operation).
-  | { type: 'revolution'; profile: Vec2[][]; degrees: number; segments: number }
+  | { type: 'revolution'; profile: Vec2[][]; degrees: number; segments: number; sketch?: SketchSource }
 
 export type PrimitiveType = PrimitiveParams['type']
 
@@ -110,6 +175,8 @@ export interface CadDocument {
   /** Top-level node order. */
   rootIds: NodeId[]
   assets: Record<string, MeshAsset>
+  /** Node ids in creation order, for the timeline. Filter to existing nodes. */
+  featureOrder: NodeId[]
 }
 
 export const SCHEMA_VERSION = 1
@@ -121,6 +188,7 @@ export function createEmptyDocument(): CadDocument {
     nodes: {},
     rootIds: [],
     assets: {},
+    featureOrder: [],
   }
 }
 

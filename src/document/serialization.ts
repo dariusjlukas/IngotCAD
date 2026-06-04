@@ -17,6 +17,7 @@ interface SerializedDocument {
   nodes: Record<NodeId, CadNode>
   rootIds: NodeId[]
   assets: Record<string, SerializedAsset>
+  featureOrder?: NodeId[]
 }
 
 export function serializeDocument(doc: CadDocument): string {
@@ -30,6 +31,7 @@ export function serializeDocument(doc: CadDocument): string {
     nodes: doc.nodes,
     rootIds: doc.rootIds,
     assets,
+    featureOrder: doc.featureOrder,
   }
   return JSON.stringify(payload)
 }
@@ -54,6 +56,8 @@ export function deserializeDocument(text: string): CadDocument {
     nodes: data.nodes,
     rootIds: data.rootIds,
     assets,
+    // Older files lack featureOrder; fall back to node insertion order.
+    featureOrder: data.featureOrder ?? Object.keys(data.nodes),
   })
 }
 

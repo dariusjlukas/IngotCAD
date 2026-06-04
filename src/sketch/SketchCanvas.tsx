@@ -52,6 +52,7 @@ export function SketchCanvas() {
   const view = useSketchStore((s) => s.view)
   const outputMode = useSketchStore((s) => s.outputMode)
   const plane = useSketchStore((s) => s.plane)
+  const editingNodeId = useSketchStore((s) => s.editingNodeId)
   const st = useSketchStore
   const [projection, setProjection] = useState<Vec2[][]>([])
 
@@ -188,7 +189,8 @@ export function SketchCanvas() {
   useEffect(() => {
     if (!plane) return
     const cadDoc = useCadStore.getState().doc
-    const roots = cadDoc.rootIds.filter((id) => cadDoc.nodes[id]?.visible)
+    // Exclude the node being edited so we don't see its old self underneath.
+    const roots = cadDoc.rootIds.filter((id) => cadDoc.nodes[id]?.visible && id !== editingNodeId)
     if (roots.length === 0) {
       setProjection([])
       return
@@ -200,7 +202,7 @@ export function SketchCanvas() {
     return () => {
       cancelled = true
     }
-  }, [plane])
+  }, [plane, editingNodeId])
 
   // track container aspect ratio so the grid can fill the full visible area
   useEffect(() => {

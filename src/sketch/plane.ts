@@ -5,17 +5,11 @@
  * this frame, so the rest of the sketcher stays plane-agnostic.
  */
 import * as THREE from 'three'
-import type { Transform, Vec3 } from '../document/types'
+import type { PlaneKind, SketchPlane, Transform, Vec3 } from '../document/types'
 import { matrix4ToTransform } from '../geometry/transform'
 
-export type PlaneKind = 'xy' | 'xz' | 'yz'
-
-export interface SketchPlane {
-  origin: Vec3
-  u: Vec3 // local +X in world
-  v: Vec3 // local +Y in world
-  n: Vec3 // local +Z (normal) in world
-}
+// Canonical home is document/types; re-export so imports from './plane' work.
+export type { PlaneKind, SketchPlane } from '../document/types'
 
 export function cardinalPlane(kind: PlaneKind): SketchPlane {
   switch (kind) {

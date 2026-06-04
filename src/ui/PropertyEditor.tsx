@@ -1,8 +1,22 @@
 /** Edits the selected node: name, color, transform, shape params, and role. */
 import type { ReactNode } from 'react'
 import { useCadStore } from '../document/store'
+import { useSketchStore } from '../sketch/sketchStore'
 import type { PrimitiveNode, PrimitiveParams } from '../document/types'
 import { NumberField, Vec3Field } from './NumberField'
+
+function EditSketchButton({ nodeId }: { nodeId: string }) {
+  const editSketch = useSketchStore((s) => s.editSketch)
+  return (
+    <button
+      type="button"
+      onClick={() => editSketch(nodeId)}
+      className="w-full rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-500"
+    >
+      ✎ Edit Sketch
+    </button>
+  )
+}
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -88,10 +102,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
           >
             Direction: {params.flip ? 'flipped (−)' : 'normal (+)'}
           </button>
-          <p className="text-xs text-neutral-500">
-            Sketch: {params.profile.length} contour{params.profile.length === 1 ? '' : 's'},{' '}
-            {params.profile.reduce((n, c) => n + c.length, 0)} points. Profile editing coming soon.
-          </p>
+          {params.sketch && <EditSketchButton nodeId={node.id} />}
         </div>
       )
     case 'revolution':
@@ -112,9 +123,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
               onCommit={(segments) => update({ ...params, segments: Math.round(segments) })}
             />
           </Field>
-          <p className="text-xs text-neutral-500">
-            Revolved sketch — {params.profile.length} contour{params.profile.length === 1 ? '' : 's'}.
-          </p>
+          {params.sketch && <EditSketchButton nodeId={node.id} />}
         </div>
       )
     case 'mesh':

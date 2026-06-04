@@ -9,6 +9,7 @@ import { SketchCanvas } from './sketch/SketchCanvas'
 import { SketchProperties, SketchToolbar, SketchToolsPanel } from './sketch/SketchPanels'
 import { PlanePicker } from './sketch/PlanePicker'
 import { OperationConfirm } from './operation/OperationConfirm'
+import { Timeline } from './ui/Timeline'
 import { engine } from './engine/engine'
 import { useCadStore } from './document/store'
 import { useViewportStore } from './viewport/viewportStore'
@@ -110,6 +111,7 @@ export default function App() {
           </>
         )}
       </div>
+      {!sketching && <Timeline />}
       <StatusBar />
     </div>
   )

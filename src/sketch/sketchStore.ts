@@ -1,8 +1,9 @@
 /** Sketch-mode state: a constraint-based sketch + selection + view + extrude height. */
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { Vec2, Vec3 } from '../document/types'
+import type { NodeId, SketchSource, Vec2, Vec3 } from '../document/types'
 import { useOperationStore } from '../operation/operationStore'
+import { useCadStore } from '../document/store'
 import type {
   ConstraintId,
   ConstraintInput,
@@ -13,9 +14,8 @@ import type {
 } from './model'
 import { emptySketch, removeShapeFromData, shapeContours, shapeIdOfPoint } from './model'
 import { solve } from './solver'
-import { bboxCenter } from './geometry'
 import type { PlaneKind, SketchPlane } from './plane'
-import { cardinalPlane, planeFromFace, planeToNodeTransform, planeToTransform } from './plane'
+import { cardinalPlane, planeFromFace, planeToTransform } from './plane'
 
 const CARDINAL_LABEL: Record<PlaneKind, string> = { xy: 'Top', xz: 'Front', yz: 'Right' }
 
@@ -53,6 +53,8 @@ interface SketchState {
   choosing: boolean
   plane: SketchPlane | null
   planeLabel: string
+  /** When set, committing updates this existing node's sketch instead of creating one. */
+  editingNodeId: NodeId | null
   tool: SketchTool | null
   data: SketchData
   selection: Ref[]
@@ -60,8 +62,10 @@ interface SketchState {
   /** What the profile becomes on commit (the value is chosen afterward in preview). */
   outputMode: 'extrude' | 'revolve'
 
-  /** Start a sketch: enter plane-selection. */
+  /** Start a new sketch: enter plane-selection. */
   open: () => void
+  /** Re-open the sketch of an existing extrusion/revolution node for editing. */
+  editSketch: (nodeId: NodeId) => void
   chooseCardinal: (kind: PlaneKind) => void
   chooseFace: (point: Vec3, normal: Vec3) => void
   cancel: () => void
@@ -104,6 +108,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
     choosing: false,
     plane: null,
     planeLabel: '',
+    editingNodeId: null,
     tool: 'line',
     data: emptySketch(),
     selection: [],
@@ -116,17 +121,38 @@ export const useSketchStore = create<SketchState>((set, get) => {
         active: false,
         plane: null,
         planeLabel: '',
+        editingNodeId: null,
         data: emptySketch(),
         selection: [],
         tool: 'line',
         view: DEFAULT_VIEW,
         outputMode: 'extrude',
       }),
+    editSketch: (nodeId) => {
+      const node = useCadStore.getState().doc.nodes[nodeId]
+      if (!node || node.kind !== 'primitive') return
+      const p = node.params
+      if ((p.type !== 'extrusion' && p.type !== 'revolution') || !p.sketch) return
+      set({
+        active: true,
+        choosing: false,
+        editingNodeId: nodeId,
+        plane: p.sketch.plane,
+        planeLabel: 'Edit',
+        data: cloneData(p.sketch.data),
+        selection: [],
+        tool: null,
+        view: DEFAULT_VIEW,
+        outputMode: p.type === 'extrusion' ? 'extrude' : 'revolve',
+      })
+      get().fitView()
+    },
     chooseCardinal: (kind) =>
       set({ plane: cardinalPlane(kind), planeLabel: CARDINAL_LABEL[kind], choosing: false, active: true }),
     chooseFace: (point, normal) =>
       set({ plane: planeFromFace(point, normal), planeLabel: 'Face', choosing: false, active: true }),
-    cancel: () => set({ active: false, choosing: false, plane: null, data: emptySketch(), selection: [] }),
+    cancel: () =>
+      set({ active: false, choosing: false, plane: null, editingNodeId: null, data: emptySketch(), selection: [] }),
     setTool: (tool) => set({ tool, selection: tool === null ? get().selection : [] }),
     setView: (view) => set({ view }),
     setOutputMode: (outputMode) => set({ outputMode }),
@@ -265,31 +291,27 @@ export const useSketchStore = create<SketchState>((set, get) => {
       const contours = shapeContours(s.data)
       if (contours.length === 0) return
       const plane = s.plane ?? cardinalPlane('xy')
-      const op = useOperationStore.getState()
-      if (s.outputMode === 'revolve') {
-        op.start({
-          mode: 'revolve',
-          profile: contours,
-          transform: planeToTransform(plane),
-          segments: 64,
-          value: 360,
-          flip: false,
-        })
-      } else {
-        // Recenter the profile in-plane; the offset rides in the node transform.
-        const [cx, cy] = bboxCenter(contours)
-        const centered = contours.map((poly) => poly.map(([x, y]) => [x - cx, y - cy] as Vec2))
-        op.start({
-          mode: 'extrude',
-          profile: centered,
-          transform: planeToNodeTransform(plane, cx, cy),
-          segments: 64,
-          value: 10,
-          flip: false,
-        })
+      // The editable source stored on the solid (snapshot of the current sketch).
+      const source: SketchSource = { data: cloneData(s.data), plane }
+
+      // Editing an existing solid: update its profile + source in place, keeping
+      // its current height/flip/angle. Everything downstream recomputes.
+      if (s.editingNodeId) {
+        useCadStore.getState().setNodeSketch(s.editingNodeId, contours, source)
+        set({ active: false, choosing: false, plane: null, editingNodeId: null, data: emptySketch(), selection: [] })
+        return
       }
-      // Leave the sketch; the live preview takes over in 3D.
-      set({ active: false, choosing: false, plane: null, data: emptySketch(), selection: [] })
+
+      // New solid: profile is used as-drawn (plane-local); the node transform is
+      // the plane frame. Hand off to the live extrude/revolve preview.
+      const op = useOperationStore.getState()
+      const transform = planeToTransform(plane)
+      if (s.outputMode === 'revolve') {
+        op.start({ mode: 'revolve', profile: contours, transform, segments: 64, value: 360, flip: false, sketch: source })
+      } else {
+        op.start({ mode: 'extrude', profile: contours, transform, segments: 64, value: 10, flip: false, sketch: source })
+      }
+      set({ active: false, choosing: false, plane: null, editingNodeId: null, data: emptySketch(), selection: [] })
     },
   }
 })

@@ -5,12 +5,12 @@
  * and confirms (one undo step via the cad store) or cancels (nothing happens).
  */
 import { create } from 'zustand'
-import type { Transform, Vec2 } from '../document/types'
+import type { SketchSource, Transform, Vec2 } from '../document/types'
 import { useCadStore } from '../document/store'
 
 export interface PendingOp {
   mode: 'extrude' | 'revolve'
-  /** For extrude: recentered profile. For revolve: as drawn (x = radius). */
+  /** Profile in plane-local mm (revolve: x = radius from the axis). */
   profile: Vec2[][]
   /** Node transform placing the plane-local solid in the world. */
   transform: Transform
@@ -19,6 +19,8 @@ export interface PendingOp {
   value: number
   /** Extrude toward -normal instead of +normal (ignored for revolve). */
   flip: boolean
+  /** Editable source stored on the created solid, for later re-editing. */
+  sketch: SketchSource
 }
 
 function clampValue(mode: PendingOp['mode'], v: number): number {
@@ -54,8 +56,8 @@ export const useOperationStore = create<OperationState>((set, get) => ({
     const op = get().pending
     if (!op) return
     const cad = useCadStore.getState()
-    if (op.mode === 'extrude') cad.addExtrusion(op.profile, op.value, op.transform, op.flip)
-    else cad.addRevolution(op.profile, op.value, op.segments, op.transform)
+    if (op.mode === 'extrude') cad.addExtrusion(op.profile, op.value, op.transform, op.flip, op.sketch)
+    else cad.addRevolution(op.profile, op.value, op.segments, op.transform, op.sketch)
     set({ pending: null })
   },
   cancel: () => set({ pending: null }),

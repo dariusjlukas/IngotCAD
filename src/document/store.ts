@@ -18,6 +18,7 @@ import type {
   PrimitiveParams,
   PrimitiveType,
   Role,
+  SketchSource,
   Transform,
   Vec2,
 } from './types'
@@ -119,12 +120,19 @@ export interface CadState {
 
   // creation / structure
   addPrimitive: (type: PrimitiveType) => NodeId
-  addExtrusion: (profile: Vec2[][], height: number, transform: Transform, flip?: boolean) => NodeId | null
+  addExtrusion: (
+    profile: Vec2[][],
+    height: number,
+    transform: Transform,
+    flip?: boolean,
+    sketch?: SketchSource,
+  ) => NodeId | null
   addRevolution: (
     profile: Vec2[][],
     degrees: number,
     segments: number,
     transform: Transform,
+    sketch?: SketchSource,
   ) => NodeId | null
   addMeshAsset: (name: string, position: Float32Array, index: Uint32Array) => NodeId
   group: (ids: NodeId[]) => NodeId | null
@@ -139,6 +147,8 @@ export interface CadState {
   setNodeName: (id: NodeId, name: string) => void
   setNodeColor: (id: NodeId, color: string) => void
   setNodeVisible: (id: NodeId, visible: boolean) => void
+  /** Update a sketch-based solid's profile + editable source (re-edit). */
+  setNodeSketch: (id: NodeId, profile: Vec2[][], sketch: SketchSource) => void
 
   // document
   loadDocument: (doc: CadDocument) => void
@@ -185,6 +195,7 @@ export const useCadStore = create<CadState>()((set, get) => {
       doc.nodes[id] = build(id, childIds)
       doc.rootIds = doc.rootIds.filter((rid) => !rootChildren.includes(rid))
       doc.rootIds.splice(firstIdx, 0, id)
+      doc.featureOrder.push(id)
       created = id
     })
     if (created) get().select([created])
@@ -229,12 +240,13 @@ export const useCadStore = create<CadState>()((set, get) => {
           },
         }
         doc.rootIds.push(id)
+        doc.featureOrder.push(id)
       })
       get().select([id])
       return id
     },
 
-    addExtrusion: (profile, height, transform, flip = false) => {
+    addExtrusion: (profile, height, transform, flip = false, sketch) => {
       // The profile arrives recentered in plane-local space; `transform` places
       // that plane in the world (and applies the in-plane offset). The extrusion
       // grows along the plane normal (engine builds it 0..height on +local-Z, or
@@ -249,19 +261,20 @@ export const useCadStore = create<CadState>()((set, get) => {
           id,
           kind: 'primitive',
           name,
-          params: { type: 'extrusion', profile: contours, height, flip },
+          params: { type: 'extrusion', profile: contours, height, flip, sketch },
           color,
           visible: true,
           role: 'solid',
           transform,
         }
         doc.rootIds.push(id)
+        doc.featureOrder.push(id)
       })
       get().select([id])
       return id
     },
 
-    addRevolution: (profile, degrees, segments, transform) => {
+    addRevolution: (profile, degrees, segments, transform, sketch) => {
       const contours = cleanContours(profile)
       if (contours.length === 0 || degrees <= 0) return null
       const id = nanoid()
@@ -272,13 +285,14 @@ export const useCadStore = create<CadState>()((set, get) => {
           id,
           kind: 'primitive',
           name,
-          params: { type: 'revolution', profile: contours, degrees, segments },
+          params: { type: 'revolution', profile: contours, degrees, segments, sketch },
           color,
           visible: true,
           role: 'solid',
           transform,
         }
         doc.rootIds.push(id)
+        doc.featureOrder.push(id)
       })
       get().select([id])
       return id
@@ -302,6 +316,7 @@ export const useCadStore = create<CadState>()((set, get) => {
           transform: { ...IDENTITY_TRANSFORM },
         }
         doc.rootIds.push(id)
+        doc.featureOrder.push(id)
       })
       get().select([id])
       return id
@@ -415,6 +430,18 @@ export const useCadStore = create<CadState>()((set, get) => {
       mutate((doc) => {
         const node = doc.nodes[id]
         if (node) node.visible = visible
+      }),
+
+    setNodeSketch: (id, profile, sketch) =>
+      mutate((doc) => {
+        const node = doc.nodes[id]
+        if (!node || node.kind !== 'primitive') return
+        const cleaned = cleanContours(profile)
+        if (node.params.type === 'extrusion') {
+          node.params = { ...node.params, profile: cleaned, sketch }
+        } else if (node.params.type === 'revolution') {
+          node.params = { ...node.params, profile: cleaned, sketch }
+        }
       }),
 
     loadDocument: (doc) => set({ doc, past: [], future: [], selectedIds: [], counter: 0 }),

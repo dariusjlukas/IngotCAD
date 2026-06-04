@@ -1,8 +1,21 @@
 import { beforeEach, describe, it, expect } from 'vitest'
 import { useCadStore } from './store'
-import { hasChildren } from './types'
+import { hasChildren, IDENTITY_TRANSFORM } from './types'
+import type { SketchSource } from './types'
 
 const store = () => useCadStore.getState()
+
+const SRC: SketchSource = {
+  data: { points: {}, shapes: [], constraints: [] },
+  plane: { origin: [0, 0, 0], u: [1, 0, 0], v: [0, 1, 0], n: [0, 0, 1] },
+}
+const TRI: [number, number][][] = [
+  [
+    [0, 0],
+    [10, 0],
+    [10, 10],
+  ],
+]
 
 beforeEach(() => store().newDocument())
 
@@ -55,6 +68,42 @@ describe('document actions', () => {
     expect(store().doc.rootIds).toEqual([])
     store().redo()
     expect(store().doc.rootIds).toEqual([id])
+  })
+
+  it('appends created nodes to featureOrder', () => {
+    const a = store().addPrimitive('box')
+    const b = store().addPrimitive('cylinder')
+    const g = store().group([a, b])!
+    expect(store().doc.featureOrder).toEqual([a, b, g])
+  })
+
+  it('addExtrusion stores the editable sketch and records the feature', () => {
+    const id = store().addExtrusion(TRI, 5, IDENTITY_TRANSFORM, false, SRC)!
+    expect(store().doc.featureOrder).toContain(id)
+    const node = store().doc.nodes[id]
+    expect(node.kind === 'primitive' && node.params.type === 'extrusion' && Boolean(node.params.sketch)).toBe(true)
+  })
+
+  it('setNodeSketch replaces the profile + sketch in place (keeping height)', () => {
+    const id = store().addExtrusion(TRI, 7, IDENTITY_TRANSFORM, false, SRC)!
+    const newProfile: [number, number][][] = [
+      [
+        [0, 0],
+        [20, 0],
+        [20, 20],
+      ],
+    ]
+    const newSrc: SketchSource = { ...SRC, plane: { ...SRC.plane, origin: [5, 0, 0] } }
+    store().setNodeSketch(id, newProfile, newSrc)
+    const node = store().doc.nodes[id]
+    if (node.kind === 'primitive' && node.params.type === 'extrusion') {
+      expect(node.params.height).toBe(7) // preserved
+      expect(node.params.profile[0]).toHaveLength(3)
+      expect(node.params.profile[0][1]).toEqual([20, 0])
+      expect(node.params.sketch?.plane.origin).toEqual([5, 0, 0])
+    } else {
+      throw new Error('expected extrusion')
+    }
   })
 
   it('records a transform edit as one undo step', () => {
