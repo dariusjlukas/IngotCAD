@@ -39,7 +39,7 @@ export function serializeDocument(doc: CadDocument): string {
 export function deserializeDocument(text: string): CadDocument {
   const data = JSON.parse(text) as Partial<SerializedDocument>
   if (!data || typeof data !== 'object' || !data.nodes || !Array.isArray(data.rootIds)) {
-    throw new Error('Not a valid Hobby CAD project file.')
+    throw new Error('Not a valid Ingot project file.')
   }
 
   const assets: Record<string, MeshAsset> = {}
@@ -64,7 +64,7 @@ export function deserializeDocument(text: string): CadDocument {
 /** Bring an older document up to the current schema. (No migrations yet.) */
 function migrate(doc: CadDocument): CadDocument {
   if (doc.schemaVersion > SCHEMA_VERSION) {
-    throw new Error('This project was made with a newer version of Hobby CAD.')
+    throw new Error('This project was made with a newer version of Ingot.')
   }
   // Future: step the document up one version at a time here.
   doc.schemaVersion = SCHEMA_VERSION

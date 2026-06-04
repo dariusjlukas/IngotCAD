@@ -87,7 +87,7 @@ export function Toolbar() {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-neutral-800 bg-neutral-900 px-2 py-1.5">
       <span className="mr-1 shrink-0 select-none text-sm font-semibold text-neutral-100">
-        Hobby&nbsp;CAD
+        Ingot
       </span>
 
       <Group>

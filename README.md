@@ -1,4 +1,4 @@
-# Hobby CAD
+# Ingot-CAD
 
 An open-source, **web-based 3D CAD program for hobbyist 3D printing**. Model
 right in the browser — no install, no account, no paywall — with primitive
@@ -11,7 +11,7 @@ shapes and boolean operations, then export a **watertight, print-ready** STL or
 ## Why
 
 Most hobbyists who want to model functional parts for 3D printing either pay for
-commercial tools or install heavy desktop software. Hobby CAD aims for the
+commercial tools or install heavy desktop software. Ingot-CAD aims for the
 "good enough, zero-friction" middle: open it in a tab, build a part, print it.
 Because every solid is evaluated by the [Manifold](https://github.com/elalish/manifold)
 geometry kernel, **what you see is watertight by construction** — no

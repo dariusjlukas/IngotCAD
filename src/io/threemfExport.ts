@@ -21,7 +21,7 @@ export async function export3mf(doc: CadDocument, filename = 'model.3mf'): Promi
   const group = new THREE.Group()
   group.add(new THREE.Mesh(geometry))
 
-  const blob = await exportTo3MF(group, { metadata: { Application: 'Hobby CAD' } })
+  const blob = await exportTo3MF(group, { metadata: { Application: 'Ingot-CAD' } })
   geometry.dispose()
   downloadBlob(blob, filename)
 }

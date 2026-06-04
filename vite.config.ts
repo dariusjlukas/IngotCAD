@@ -18,8 +18,8 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
       manifest: {
-        name: 'Hobby CAD',
-        short_name: 'HobbyCAD',
+        name: 'Ingot',
+        short_name: 'Ingot',
         description: 'Open-source web 3D CAD for hobbyist 3D printing.',
         theme_color: '#15161b',
         background_color: '#15161b',
