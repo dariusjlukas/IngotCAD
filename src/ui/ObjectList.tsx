@@ -56,11 +56,11 @@ function ObjectRow({ id, depth }: { id: NodeId; depth: number }) {
   )
 }
 
-export function ObjectList() {
+export function ObjectList({ width }: { width: number }) {
   const rootIds = useCadStore((s) => s.doc.rootIds)
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900">
+    <aside className="flex shrink-0 flex-col bg-neutral-900" style={{ width }}>
       <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
         Objects
       </div>

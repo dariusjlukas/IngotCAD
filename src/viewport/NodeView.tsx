@@ -9,13 +9,15 @@
  * stays at 60fps. On release ('dragging-changed' → false) we write the final
  * transform to the store exactly once, making the whole drag a single undo step.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import { TransformControls } from '@react-three/drei'
 import { useCadStore } from '../document/store'
 import { useViewportStore } from './viewportStore'
+import { useSketchStore } from '../sketch/sketchStore'
 import { useDerivedGeometry } from './useDerivedGeometry'
+import { coplanarFacePositions } from './faceHighlight'
 import { objectToTransform, rotationDegToRadians } from '../geometry/transform'
 import type { NodeId, Transform } from '../document/types'
 
@@ -39,6 +41,7 @@ export function NodeView({ id }: { id: NodeId }) {
   const transformNode = useCadStore((s) => s.transformNode)
   const gizmoMode = useViewportStore((s) => s.gizmoMode)
   const requestFocus = useViewportStore((s) => s.requestFocus)
+  const choosing = useSketchStore((s) => s.choosing)
   const geometry = useDerivedGeometry(id)
 
   const [meshObj, setMeshObj] = useState<THREE.Mesh | null>(null)
@@ -47,6 +50,11 @@ export function NodeView({ id }: { id: NodeId }) {
   // Latest committed transform, for the no-op guard below.
   const transformRef = useRef<Transform | undefined>(node?.transform)
   transformRef.current = node?.transform
+
+  // Hover-highlight of the coplanar face under the cursor (only while choosing
+  // a sketch plane). `hoverTriRef` avoids recomputing when the triangle is the same.
+  const [hoverFace, setHoverFace] = useState<Float32Array | null>(null)
+  const hoverTriRef = useRef<number>(-1)
 
   useEffect(() => {
     // `isOnlySelected` is a dep so this re-runs when the gizmo mounts and
@@ -64,12 +72,37 @@ export function NodeView({ id }: { id: NodeId }) {
     return () => controls.removeEventListener('dragging-changed', onDragging)
   }, [meshObj, id, transformNode, isOnlySelected])
 
+  const hoverGeometry = useMemo(() => {
+    if (!hoverFace) return null
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(hoverFace, 3))
+    return g
+  }, [hoverFace])
+  useEffect(() => () => hoverGeometry?.dispose(), [hoverGeometry])
+
+  // Clear the hover highlight when we leave plane-choosing mode.
+  useEffect(() => {
+    if (!choosing) {
+      hoverTriRef.current = -1
+      setHoverFace(null)
+    }
+  }, [choosing])
+
   if (!node || !node.visible || !geometry) return null
 
   const rot = rotationDegToRadians(node.transform.rotationDeg)
 
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation()
+    // While choosing a sketch plane, a click picks this face instead of selecting.
+    const sk = useSketchStore.getState()
+    if (sk.choosing) {
+      if (e.face) {
+        const n = e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
+        sk.chooseFace([e.point.x, e.point.y, e.point.z], [n.x, n.y, n.z])
+      }
+      return
+    }
     if (e.shiftKey) toggleSelect(id)
     else select([id])
   }
@@ -84,6 +117,20 @@ export function NodeView({ id }: { id: NodeId }) {
     requestFocus([center.x, center.y, center.z], radius)
   }
 
+  const onPointerMove = (e: ThreeEvent<PointerEvent>) => {
+    if (!useSketchStore.getState().choosing) return
+    e.stopPropagation()
+    const fi = e.faceIndex ?? -1
+    if (fi === hoverTriRef.current) return
+    hoverTriRef.current = fi
+    setHoverFace(fi >= 0 ? coplanarFacePositions(geometry, fi) : null)
+  }
+  const onPointerOut = () => {
+    if (hoverTriRef.current === -1) return
+    hoverTriRef.current = -1
+    setHoverFace(null)
+  }
+
   return (
     <>
       <mesh
@@ -94,6 +141,8 @@ export function NodeView({ id }: { id: NodeId }) {
         scale={node.transform.scale}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
+        onPointerMove={onPointerMove}
+        onPointerOut={onPointerOut}
       >
         <meshStandardMaterial
           color={node.color}
@@ -104,7 +153,30 @@ export function NodeView({ id }: { id: NodeId }) {
           emissiveIntensity={selected ? 0.4 : 0}
         />
       </mesh>
-      {isOnlySelected && meshObj && (
+
+      {/* Hover highlight of the face that would become the sketch plane. */}
+      {choosing && hoverGeometry && (
+        <mesh
+          geometry={hoverGeometry}
+          position={node.transform.position}
+          rotation={[rot[0], rot[1], rot[2]]}
+          scale={node.transform.scale}
+          raycast={() => null}
+        >
+          <meshBasicMaterial
+            color="#7bd88f"
+            transparent
+            opacity={0.4}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+            polygonOffset
+            polygonOffsetFactor={-4}
+            polygonOffsetUnits={-4}
+          />
+        </mesh>
+      )}
+
+      {isOnlySelected && meshObj && !choosing && (
         <TransformControls ref={controlsRef} object={meshObj} mode={gizmoMode} />
       )}
     </>

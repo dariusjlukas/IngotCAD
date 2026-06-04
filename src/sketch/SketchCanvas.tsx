@@ -16,6 +16,9 @@ import type { Ref } from './sketchStore'
 import type { PointId } from './model'
 import { loopSegments } from './model'
 import { distance, niceStep } from './geometry'
+import { worldToLocalMatrix } from './plane'
+import { useCadStore } from '../document/store'
+import { engine } from '../engine/engine'
 
 const CLOSE_DIST = 4
 const pt = (x: number, y: number) => `${x},${-y}`
@@ -48,7 +51,9 @@ export function SketchCanvas() {
   const selection = useSketchStore((s) => s.selection)
   const view = useSketchStore((s) => s.view)
   const outputMode = useSketchStore((s) => s.outputMode)
+  const plane = useSketchStore((s) => s.plane)
   const st = useSketchStore
+  const [projection, setProjection] = useState<Vec2[][]>([])
 
   const svgRef = useRef<SVGSVGElement>(null)
   const [cursor, setCursor] = useState<Vec2 | null>(null)
@@ -177,6 +182,25 @@ export function SketchCanvas() {
     }
     setEditing(null)
   }
+
+  // Project the existing scene onto this plane for a reference underlay. The cad
+  // document is static while sketching, so this runs once per chosen plane.
+  useEffect(() => {
+    if (!plane) return
+    const cadDoc = useCadStore.getState().doc
+    const roots = cadDoc.rootIds.filter((id) => cadDoc.nodes[id]?.visible)
+    if (roots.length === 0) {
+      setProjection([])
+      return
+    }
+    let cancelled = false
+    engine.projectScene(cadDoc, roots, worldToLocalMatrix(plane)).then((p) => {
+      if (!cancelled) setProjection(p)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [plane])
 
   // track container aspect ratio so the grid can fill the full visible area
   useEffect(() => {
@@ -498,6 +522,19 @@ export function SketchCanvas() {
             </text>
           </>
         )}
+
+        {/* Reference: the existing scene projected onto this plane */}
+        {projection.map((poly, i) => (
+          <path
+            key={`proj${i}`}
+            d={path(poly)}
+            fill="rgba(150,165,190,0.06)"
+            stroke="rgba(150,165,190,0.4)"
+            strokeWidth={1}
+            strokeDasharray="2 2"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
 
         {data.shapes.map((s) =>
           s.kind === 'circle' ? (

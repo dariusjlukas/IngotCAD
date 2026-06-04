@@ -43,7 +43,8 @@ export type PrimitiveParams =
   | { type: 'mesh'; assetId: string }
   // A 2D sketch extruded along Z. `profile` is a set of closed contours
   // (each a list of [x,y] points in mm, CCW-wound), extruded by `height`.
-  | { type: 'extrusion'; profile: Vec2[][]; height: number }
+  // `flip` extrudes toward -Z (the other side of the plane) instead of +Z.
+  | { type: 'extrusion'; profile: Vec2[][]; height: number; flip?: boolean }
   // A 2D sketch revolved around the Y axis (x=0) by `degrees`; that axis
   // becomes the solid's Z axis (a lathe operation).
   | { type: 'revolution'; profile: Vec2[][]; degrees: number; segments: number }

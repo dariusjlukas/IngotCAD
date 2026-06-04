@@ -6,6 +6,7 @@ import { Canvas } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, OrbitControls } from '@react-three/drei'
 import { CadScene } from './CadScene'
 import { CameraController } from './CameraController'
+import { OperationPreview } from '../operation/OperationPreview'
 import { useCadStore } from '../document/store'
 
 export function Viewport() {
@@ -28,6 +29,7 @@ export function Viewport() {
       <gridHelper args={[400, 40, '#46506b', '#262a33']} rotation={[Math.PI / 2, 0, 0]} />
 
       <CadScene />
+      <OperationPreview />
 
       <CameraController />
       <OrbitControls makeDefault enableDamping dampingFactor={0.12} />

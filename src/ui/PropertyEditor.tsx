@@ -81,6 +81,13 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
           <Field label="Height">
             <NumberField value={params.height} min={0.1} onCommit={(height) => update({ ...params, height })} />
           </Field>
+          <button
+            type="button"
+            onClick={() => update({ ...params, flip: !params.flip })}
+            className="w-full rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-700"
+          >
+            Direction: {params.flip ? 'flipped (−)' : 'normal (+)'}
+          </button>
           <p className="text-xs text-neutral-500">
             Sketch: {params.profile.length} contour{params.profile.length === 1 ? '' : 's'},{' '}
             {params.profile.reduce((n, c) => n + c.length, 0)} points. Profile editing coming soon.
@@ -115,7 +122,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
   }
 }
 
-export function PropertyEditor() {
+export function PropertyEditor({ width }: { width: number }) {
   const id = useCadStore((s) => (s.selectedIds.length === 1 ? s.selectedIds[0] : null))
   const node = useCadStore((s) => (id ? s.doc.nodes[id] : null))
   const isChild = useCadStore((s) => (id ? !s.doc.rootIds.includes(id) : false))
@@ -127,7 +134,7 @@ export function PropertyEditor() {
   const setRole = useCadStore((s) => s.setRole)
 
   const Shell = ({ children }: { children: ReactNode }) => (
-    <aside className="flex w-64 shrink-0 flex-col border-l border-neutral-800 bg-neutral-900">
+    <aside className="flex shrink-0 flex-col bg-neutral-900" style={{ width }}>
       <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
         Properties
       </div>

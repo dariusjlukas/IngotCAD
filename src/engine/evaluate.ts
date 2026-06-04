@@ -14,7 +14,7 @@
  *                          the root's transform to the three.js mesh, so moving
  *                          a root never rebuilds geometry.
  */
-import type { ManifoldToplevel, Manifold, Mat4 } from 'manifold-3d'
+import type { ManifoldToplevel, Manifold, Mat4, CrossSection } from 'manifold-3d'
 import type { BooleanOp, CadDocument, NodeId, PrimitiveParams, Role, Vec2 } from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
 import { EMPTY_MESH } from '../geometry/manifoldToThree'
@@ -49,7 +49,7 @@ function buildPrimitive(M: Wasm, doc: CadDocument, params: PrimitiveParams): Man
     case 'mesh':
       return buildMeshPrimitive(M, doc, params.assetId)
     case 'extrusion':
-      return buildExtrusion(M, params.profile, params.height)
+      return buildExtrusion(M, params.profile, params.height, params.flip ?? false)
     case 'revolution':
       return buildRevolution(M, params.profile, params.degrees, params.segments)
   }
@@ -64,13 +64,20 @@ function buildRevolution(M: Wasm, profile: Vec2[][], degrees: number, segments: 
   return solid
 }
 
-function buildExtrusion(M: Wasm, profile: Vec2[][], height: number): Manifold {
+function buildExtrusion(M: Wasm, profile: Vec2[][], height: number, flip: boolean): Manifold {
   if (profile.length === 0 || height <= 0) return emptySolid(M)
-  // CrossSection unions the contours (Positive fill rule); extrude centered on Z
-  // so the solid behaves like the other origin-centered primitives.
+  // CrossSection unions the contours (Positive fill rule); extrude from 0 to
+  // +height along local +Z so it grows *out of* the sketch plane (the node's
+  // transform places that plane). Not centered.
   const cross = new M.CrossSection(profile, 'Positive')
-  const solid = cross.extrude(height, 0, 0, undefined, true)
+  let solid = cross.extrude(height, 0, 0, undefined, false)
   cross.delete()
+  if (flip) {
+    // Move it to span -height..0 so it grows the other way (profile unchanged).
+    const moved = solid.translate(0, 0, -height)
+    solid.delete()
+    solid = moved
+  }
   return solid
 }
 
@@ -198,6 +205,38 @@ export function computeExportRaw(M: Wasm, doc: CadDocument, rootIds: NodeId[]): 
     return EMPTY_MESH
   } finally {
     result?.delete()
+  }
+}
+
+/**
+ * Project the visible scene onto a sketch plane: evaluate the roots in world
+ * space, transform into plane-local space (invMatrix = world→local), then
+ * Manifold.project() flattens them onto local XY. Returns the outline polygons
+ * (plane-local mm) for a reference underlay in the sketch view.
+ */
+export function projectSceneRaw(
+  M: Wasm,
+  doc: CadDocument,
+  rootIds: NodeId[],
+  invMatrix: number[],
+): Vec2[][] {
+  const solids = rootIds.filter((id) => doc.nodes[id]).map((id) => evaluate(M, doc, id))
+  if (solids.length === 0) return []
+  let unioned: Manifold | null = null
+  let local: Manifold | null = null
+  let cross: CrossSection | null = null
+  try {
+    unioned = unionAll(M, solids)
+    local = unioned.transform(invMatrix as unknown as Mat4)
+    cross = local.project()
+    return cross.toPolygons().map((poly) => poly.map((p) => [p[0], p[1]] as Vec2))
+  } catch (err) {
+    console.error('projectSceneRaw failed', err)
+    return []
+  } finally {
+    cross?.delete()
+    local?.delete()
+    unioned?.delete()
   }
 }
 

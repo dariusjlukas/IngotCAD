@@ -1,8 +1,8 @@
 /** Sketch-mode state: a constraint-based sketch + selection + view + extrude height. */
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { Vec2 } from '../document/types'
-import { useCadStore } from '../document/store'
+import type { Vec2, Vec3 } from '../document/types'
+import { useOperationStore } from '../operation/operationStore'
 import type {
   ConstraintId,
   ConstraintInput,
@@ -13,6 +13,11 @@ import type {
 } from './model'
 import { emptySketch, removeShapeFromData, shapeContours, shapeIdOfPoint } from './model'
 import { solve } from './solver'
+import { bboxCenter } from './geometry'
+import type { PlaneKind, SketchPlane } from './plane'
+import { cardinalPlane, planeFromFace, planeToNodeTransform, planeToTransform } from './plane'
+
+const CARDINAL_LABEL: Record<PlaneKind, string> = { xy: 'Top', xz: 'Front', yz: 'Right' }
 
 /** Drawing tools. `null` means Select mode (the absence of a tool). */
 export type SketchTool = 'line' | 'rectangle' | 'circle' | 'dimension'
@@ -44,24 +49,26 @@ function cloneData(d: SketchData): SketchData {
 
 interface SketchState {
   active: boolean
+  /** True while the user is picking a plane/face before the canvas opens. */
+  choosing: boolean
+  plane: SketchPlane | null
+  planeLabel: string
   tool: SketchTool | null
   data: SketchData
   selection: Ref[]
-  height: number
   view: View
-  /** What the profile becomes on commit. */
+  /** What the profile becomes on commit (the value is chosen afterward in preview). */
   outputMode: 'extrude' | 'revolve'
-  /** Revolve sweep angle in degrees. */
-  degrees: number
 
+  /** Start a sketch: enter plane-selection. */
   open: () => void
+  chooseCardinal: (kind: PlaneKind) => void
+  chooseFace: (point: Vec3, normal: Vec3) => void
   cancel: () => void
   setTool: (tool: SketchTool | null) => void
-  setHeight: (height: number) => void
   setView: (view: View) => void
   fitView: () => void
   setOutputMode: (mode: 'extrude' | 'revolve') => void
-  setDegrees: (degrees: number) => void
 
   addRectangle: (x: number, y: number, w: number, h: number) => void
   addCircle: (cx: number, cy: number, r: number) => void
@@ -94,31 +101,35 @@ export const useSketchStore = create<SketchState>((set, get) => {
 
   return {
     active: false,
+    choosing: false,
+    plane: null,
+    planeLabel: '',
     tool: 'line',
     data: emptySketch(),
     selection: [],
-    height: 10,
     view: DEFAULT_VIEW,
     outputMode: 'extrude',
-    degrees: 360,
 
     open: () =>
       set({
-        active: true,
+        choosing: true,
+        active: false,
+        plane: null,
+        planeLabel: '',
         data: emptySketch(),
         selection: [],
         tool: 'line',
-        height: 10,
         view: DEFAULT_VIEW,
         outputMode: 'extrude',
-        degrees: 360,
       }),
-    cancel: () => set({ active: false, data: emptySketch(), selection: [] }),
+    chooseCardinal: (kind) =>
+      set({ plane: cardinalPlane(kind), planeLabel: CARDINAL_LABEL[kind], choosing: false, active: true }),
+    chooseFace: (point, normal) =>
+      set({ plane: planeFromFace(point, normal), planeLabel: 'Face', choosing: false, active: true }),
+    cancel: () => set({ active: false, choosing: false, plane: null, data: emptySketch(), selection: [] }),
     setTool: (tool) => set({ tool, selection: tool === null ? get().selection : [] }),
-    setHeight: (height) => set({ height: Math.max(0.1, height) }),
     setView: (view) => set({ view }),
     setOutputMode: (outputMode) => set({ outputMode }),
-    setDegrees: (degrees) => set({ degrees: Math.max(1, Math.min(360, degrees)) }),
     fitView: () =>
       set((s) => {
         const pts = Object.values(s.data.points)
@@ -253,12 +264,32 @@ export const useSketchStore = create<SketchState>((set, get) => {
       const s = get()
       const contours = shapeContours(s.data)
       if (contours.length === 0) return
-      const cad = useCadStore.getState()
-      const created =
-        s.outputMode === 'revolve'
-          ? cad.addRevolution(contours, s.degrees, 64)
-          : cad.addExtrusion(contours, s.height)
-      if (created) set({ active: false, data: emptySketch(), selection: [] })
+      const plane = s.plane ?? cardinalPlane('xy')
+      const op = useOperationStore.getState()
+      if (s.outputMode === 'revolve') {
+        op.start({
+          mode: 'revolve',
+          profile: contours,
+          transform: planeToTransform(plane),
+          segments: 64,
+          value: 360,
+          flip: false,
+        })
+      } else {
+        // Recenter the profile in-plane; the offset rides in the node transform.
+        const [cx, cy] = bboxCenter(contours)
+        const centered = contours.map((poly) => poly.map(([x, y]) => [x - cx, y - cy] as Vec2))
+        op.start({
+          mode: 'extrude',
+          profile: centered,
+          transform: planeToNodeTransform(plane, cx, cy),
+          segments: 64,
+          value: 10,
+          flip: false,
+        })
+      }
+      // Leave the sketch; the live preview takes over in 3D.
+      set({ active: false, choosing: false, plane: null, data: emptySketch(), selection: [] })
     },
   }
 })

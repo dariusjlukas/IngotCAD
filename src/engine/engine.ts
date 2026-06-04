@@ -12,9 +12,9 @@
  * handle across an await.
  */
 import { loadManifold } from './manifoldModule'
-import { computeExportRaw, computeMeshRaw, measureSolid } from './evaluate'
+import { computeExportRaw, computeMeshRaw, measureSolid, projectSceneRaw } from './evaluate'
 import type { ManifoldToplevel } from 'manifold-3d'
-import type { CadDocument, NodeId } from '../document/types'
+import type { CadDocument, NodeId, Vec2 } from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
 
 class Engine {
@@ -47,6 +47,12 @@ class Engine {
   async measure(doc: CadDocument, id: NodeId): Promise<{ triangles: number; volume: number }> {
     await this.ready
     return measureSolid(this.module!, doc, id)
+  }
+
+  /** Outline polygons of the visible scene projected onto a sketch plane. */
+  async projectScene(doc: CadDocument, rootIds: NodeId[], invMatrix: number[]): Promise<Vec2[][]> {
+    await this.ready
+    return projectSceneRaw(this.module!, doc, rootIds, invMatrix)
   }
 }
 

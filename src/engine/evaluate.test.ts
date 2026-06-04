@@ -3,7 +3,7 @@ import Module from 'manifold-3d'
 import type { ManifoldToplevel } from 'manifold-3d'
 import { computeExportRaw, measureSolid } from './evaluate'
 import { createEmptyDocument, IDENTITY_TRANSFORM } from '../document/types'
-import type { CadDocument, CadNode, PrimitiveParams } from '../document/types'
+import type { CadDocument, CadNode, PrimitiveParams, Vec2 } from '../document/types'
 
 let M: ManifoldToplevel
 
@@ -93,6 +93,34 @@ describe('Manifold evaluation pipeline', () => {
     )
     // 10 × 20 rectangle, extruded 5mm → 1000 mm³
     expect(measureSolid(M, doc, 'ext').volume).toBeCloseTo(1000, 0)
+  })
+
+  it('flip extrudes to the other side of the plane (−Z instead of +Z)', () => {
+    const profile: Vec2[][] = [
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    ]
+    const zRange = (raw: { position: Float32Array }) => {
+      let mn = Infinity
+      let mx = -Infinity
+      for (let i = 2; i < raw.position.length; i += 3) {
+        mn = Math.min(mn, raw.position[i])
+        mx = Math.max(mx, raw.position[i])
+      }
+      return [mn, mx]
+    }
+    const up = docOf([prim('u', { type: 'extrusion', profile, height: 5 })], ['u'])
+    const down = docOf([prim('d', { type: 'extrusion', profile, height: 5, flip: true })], ['d'])
+    const [umn, umx] = zRange(computeExportRaw(M, up, ['u']))
+    const [dmn, dmx] = zRange(computeExportRaw(M, down, ['d']))
+    expect(umn).toBeCloseTo(0, 3)
+    expect(umx).toBeCloseTo(5, 3)
+    expect(dmn).toBeCloseTo(-5, 3)
+    expect(dmx).toBeCloseTo(0, 3)
   })
 
   it('revolves a profile into a solid of revolution (tube volume)', () => {

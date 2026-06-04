@@ -23,7 +23,7 @@ import type {
 } from './types'
 import { createEmptyDocument, hasChildren, IDENTITY_TRANSFORM } from './types'
 import { transformToMatrix4, matrix4ToTransform } from '../geometry/transform'
-import { bboxCenter, cleanContours } from '../sketch/geometry'
+import { cleanContours } from '../sketch/geometry'
 
 const HISTORY_LIMIT = 100
 
@@ -119,8 +119,13 @@ export interface CadState {
 
   // creation / structure
   addPrimitive: (type: PrimitiveType) => NodeId
-  addExtrusion: (profile: Vec2[][], height: number) => NodeId | null
-  addRevolution: (profile: Vec2[][], degrees: number, segments: number) => NodeId | null
+  addExtrusion: (profile: Vec2[][], height: number, transform: Transform, flip?: boolean) => NodeId | null
+  addRevolution: (
+    profile: Vec2[][],
+    degrees: number,
+    segments: number,
+    transform: Transform,
+  ) => NodeId | null
   addMeshAsset: (name: string, position: Float32Array, index: Uint32Array) => NodeId
   group: (ids: NodeId[]) => NodeId | null
   ungroup: (id: NodeId) => void
@@ -229,15 +234,13 @@ export const useCadStore = create<CadState>()((set, get) => {
       return id
     },
 
-    addExtrusion: (profile, height) => {
+    addExtrusion: (profile, height, transform, flip = false) => {
+      // The profile arrives recentered in plane-local space; `transform` places
+      // that plane in the world (and applies the in-plane offset). The extrusion
+      // grows along the plane normal (engine builds it 0..height on +local-Z, or
+      // -Z when flipped).
       const contours = cleanContours(profile)
       if (contours.length === 0 || height <= 0) return null
-
-      // Recenter the profile on the node origin (so the gizmo sits on the solid)
-      // while keeping it where it was drawn via the node's transform.
-      const [cx, cy] = bboxCenter(contours)
-      const centered = contours.map((c) => c.map(([x, y]) => [x - cx, y - cy] as Vec2))
-
       const id = nanoid()
       const name = nextName(TYPE_LABEL.extrusion)
       const color = PALETTE[get().counter % PALETTE.length]
@@ -246,11 +249,11 @@ export const useCadStore = create<CadState>()((set, get) => {
           id,
           kind: 'primitive',
           name,
-          params: { type: 'extrusion', profile: centered, height },
+          params: { type: 'extrusion', profile: contours, height, flip },
           color,
           visible: true,
           role: 'solid',
-          transform: { position: [cx, cy, height / 2], rotationDeg: [0, 0, 0], scale: [1, 1, 1] },
+          transform,
         }
         doc.rootIds.push(id)
       })
@@ -258,11 +261,9 @@ export const useCadStore = create<CadState>()((set, get) => {
       return id
     },
 
-    addRevolution: (profile, degrees, segments) => {
+    addRevolution: (profile, degrees, segments, transform) => {
       const contours = cleanContours(profile)
       if (contours.length === 0 || degrees <= 0) return null
-      // Do NOT recenter: the sketch's Y axis (x=0) is the revolve axis and the
-      // profile's Y becomes Z, so the geometry is already correctly placed.
       const id = nanoid()
       const name = nextName(TYPE_LABEL.revolution)
       const color = PALETTE[get().counter % PALETTE.length]
@@ -275,7 +276,7 @@ export const useCadStore = create<CadState>()((set, get) => {
           color,
           visible: true,
           role: 'solid',
-          transform: { ...IDENTITY_TRANSFORM },
+          transform,
         }
         doc.rootIds.push(id)
       })

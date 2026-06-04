@@ -60,20 +60,19 @@ function Btn({
 export function SketchToolbar() {
   const tool = useSketchStore((s) => s.tool)
   const setTool = useSketchStore((s) => s.setTool)
-  const height = useSketchStore((s) => s.height)
-  const setHeight = useSketchStore((s) => s.setHeight)
-  const degrees = useSketchStore((s) => s.degrees)
-  const setDegrees = useSketchStore((s) => s.setDegrees)
   const outputMode = useSketchStore((s) => s.outputMode)
   const setOutputMode = useSketchStore((s) => s.setOutputMode)
   const fitView = useSketchStore((s) => s.fitView)
   const cancel = useSketchStore((s) => s.cancel)
   const commit = useSketchStore((s) => s.commit)
+  const planeLabel = useSketchStore((s) => s.planeLabel)
   const hasShapes = useSketchStore((s) => s.data.shapes.length > 0)
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-neutral-800 bg-neutral-900 px-2 py-1.5">
-      <span className="mr-1 shrink-0 select-none text-sm font-semibold text-neutral-100">Sketch</span>
+      <span className="mr-1 shrink-0 select-none text-sm font-semibold text-neutral-100">
+        Sketch{planeLabel ? ` · ${planeLabel}` : ''}
+      </span>
 
       <Btn onClick={() => setTool(null)} active={tool === null} title="Select (Esc)">
         Select
@@ -88,6 +87,7 @@ export function SketchToolbar() {
       <Btn onClick={fitView} title="Fit view to sketch">Fit</Btn>
 
       <div className="mx-1 h-5 w-px shrink-0 bg-neutral-700" />
+      <span className="text-xs uppercase tracking-wide text-neutral-500">Make</span>
       <div className="flex shrink-0 overflow-hidden rounded border border-neutral-700">
         {(['extrude', 'revolve'] as const).map((m) => (
           <button
@@ -104,24 +104,6 @@ export function SketchToolbar() {
         ))}
       </div>
 
-      {outputMode === 'extrude' ? (
-        <label className="flex items-center gap-1.5 text-sm text-neutral-400">
-          Height
-          <div className="w-20">
-            <NumberField value={height} min={0.1} onCommit={setHeight} />
-          </div>
-          mm
-        </label>
-      ) : (
-        <label className="flex items-center gap-1.5 text-sm text-neutral-400">
-          Angle
-          <div className="w-20">
-            <NumberField value={degrees} min={1} onCommit={setDegrees} />
-          </div>
-          °
-        </label>
-      )}
-
       <div className="flex-1" />
       <span className="hidden text-xs text-neutral-500 xl:inline">
         {outputMode === 'revolve'
@@ -134,8 +116,9 @@ export function SketchToolbar() {
         onClick={commit}
         disabled={!hasShapes}
         className="shrink-0 rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-35"
+        title="Preview and place the solid"
       >
-        {outputMode === 'revolve' ? 'Revolve → Add' : 'Extrude → Add'}
+        {outputMode === 'revolve' ? 'Revolve →' : 'Extrude →'}
       </button>
     </div>
   )
