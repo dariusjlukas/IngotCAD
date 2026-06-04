@@ -44,6 +44,9 @@ export type PrimitiveParams =
   // A 2D sketch extruded along Z. `profile` is a set of closed contours
   // (each a list of [x,y] points in mm, CCW-wound), extruded by `height`.
   | { type: 'extrusion'; profile: Vec2[][]; height: number }
+  // A 2D sketch revolved around the Y axis (x=0) by `degrees`; that axis
+  // becomes the solid's Z axis (a lathe operation).
+  | { type: 'revolution'; profile: Vec2[][]; degrees: number; segments: number }
 
 export type PrimitiveType = PrimitiveParams['type']
 

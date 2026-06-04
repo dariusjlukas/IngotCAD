@@ -95,6 +95,32 @@ describe('Manifold evaluation pipeline', () => {
     expect(measureSolid(M, doc, 'ext').volume).toBeCloseTo(1000, 0)
   })
 
+  it('revolves a profile into a solid of revolution (tube volume)', () => {
+    // Rectangle x∈[5,15], y∈[0,10] revolved 360° around x=0 → tube R=15, r=5, h=10.
+    const doc = docOf(
+      [
+        prim('rev', {
+          type: 'revolution',
+          profile: [
+            [
+              [5, 0],
+              [15, 0],
+              [15, 10],
+              [5, 10],
+            ],
+          ],
+          degrees: 360,
+          segments: 64,
+        }),
+      ],
+      ['rev'],
+    )
+    // π·(15² − 5²)·10 ≈ 6283; the 64-gon facets make it slightly less.
+    const vol = measureSolid(M, doc, 'rev').volume
+    expect(vol).toBeGreaterThan(6000)
+    expect(vol).toBeLessThan(6300)
+  })
+
   it('unions two disjoint boxes (volume ~16000)', () => {
     const doc = docOf(
       [

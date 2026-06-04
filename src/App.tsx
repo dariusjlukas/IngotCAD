@@ -4,7 +4,8 @@ import { ObjectList } from './ui/ObjectList'
 import { PropertyEditor } from './ui/PropertyEditor'
 import { StatusBar } from './ui/StatusBar'
 import { Viewport } from './viewport/Viewport'
-import { SketchOverlay } from './sketch/SketchOverlay'
+import { SketchCanvas } from './sketch/SketchCanvas'
+import { SketchProperties, SketchToolbar, SketchToolsPanel } from './sketch/SketchPanels'
 import { engine } from './engine/engine'
 import { useCadStore } from './document/store'
 import { useViewportStore } from './viewport/viewportStore'
@@ -69,19 +70,21 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col bg-neutral-950 text-neutral-200">
-      <Toolbar />
+      {sketching ? <SketchToolbar /> : <Toolbar />}
       <div className="flex min-h-0 flex-1">
-        <ObjectList />
+        {sketching ? <SketchToolsPanel /> : <ObjectList />}
         <div className="relative min-w-0 flex-1">
+          {/* The 3D viewport stays mounted (keeps the WebGL context + engine warm);
+              the sketch canvas overlays it while sketching. */}
           <Viewport />
-          {sketching && <SketchOverlay />}
-          {!ready && (
+          {sketching && <SketchCanvas />}
+          {!ready && !sketching && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-neutral-950/60 text-sm text-neutral-300">
               Loading geometry engine…
             </div>
           )}
         </div>
-        <PropertyEditor />
+        {sketching ? <SketchProperties /> : <PropertyEditor />}
       </div>
       <StatusBar />
     </div>

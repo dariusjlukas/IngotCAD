@@ -87,6 +87,29 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
           </p>
         </div>
       )
+    case 'revolution':
+      return (
+        <div className="space-y-1.5">
+          <Field label="Angle (°)">
+            <NumberField
+              value={params.degrees}
+              min={1}
+              onCommit={(degrees) => update({ ...params, degrees: Math.min(360, degrees) })}
+            />
+          </Field>
+          <Field label="Segments">
+            <NumberField
+              value={params.segments}
+              min={3}
+              step={1}
+              onCommit={(segments) => update({ ...params, segments: Math.round(segments) })}
+            />
+          </Field>
+          <p className="text-xs text-neutral-500">
+            Revolved sketch — {params.profile.length} contour{params.profile.length === 1 ? '' : 's'}.
+          </p>
+        </div>
+      )
     case 'mesh':
       return <p className="text-xs text-neutral-500">Imported mesh — no editable parameters.</p>
   }

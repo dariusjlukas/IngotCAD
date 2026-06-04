@@ -35,6 +35,7 @@ const TYPE_LABEL: Record<PrimitiveType, string> = {
   sphere: 'Sphere',
   mesh: 'Mesh',
   extrusion: 'Sketch',
+  revolution: 'Revolve',
 }
 
 function defaultParams(type: PrimitiveType): PrimitiveParams {
@@ -49,6 +50,8 @@ function defaultParams(type: PrimitiveType): PrimitiveParams {
       return { type: 'mesh', assetId: '' }
     case 'extrusion':
       return { type: 'extrusion', profile: [], height: 10 }
+    case 'revolution':
+      return { type: 'revolution', profile: [], degrees: 360, segments: 64 }
   }
 }
 
@@ -65,6 +68,8 @@ function restingZ(params: PrimitiveParams): number {
       return 0
     case 'extrusion':
       return params.height / 2
+    case 'revolution':
+      return 0 // the profile's own Y becomes Z, so no extra lift
   }
 }
 
@@ -115,6 +120,7 @@ export interface CadState {
   // creation / structure
   addPrimitive: (type: PrimitiveType) => NodeId
   addExtrusion: (profile: Vec2[][], height: number) => NodeId | null
+  addRevolution: (profile: Vec2[][], degrees: number, segments: number) => NodeId | null
   addMeshAsset: (name: string, position: Float32Array, index: Uint32Array) => NodeId
   group: (ids: NodeId[]) => NodeId | null
   ungroup: (id: NodeId) => void
@@ -245,6 +251,31 @@ export const useCadStore = create<CadState>()((set, get) => {
           visible: true,
           role: 'solid',
           transform: { position: [cx, cy, height / 2], rotationDeg: [0, 0, 0], scale: [1, 1, 1] },
+        }
+        doc.rootIds.push(id)
+      })
+      get().select([id])
+      return id
+    },
+
+    addRevolution: (profile, degrees, segments) => {
+      const contours = cleanContours(profile)
+      if (contours.length === 0 || degrees <= 0) return null
+      // Do NOT recenter: the sketch's Y axis (x=0) is the revolve axis and the
+      // profile's Y becomes Z, so the geometry is already correctly placed.
+      const id = nanoid()
+      const name = nextName(TYPE_LABEL.revolution)
+      const color = PALETTE[get().counter % PALETTE.length]
+      mutate((doc) => {
+        doc.nodes[id] = {
+          id,
+          kind: 'primitive',
+          name,
+          params: { type: 'revolution', profile: contours, degrees, segments },
+          color,
+          visible: true,
+          role: 'solid',
+          transform: { ...IDENTITY_TRANSFORM },
         }
         doc.rootIds.push(id)
       })

@@ -50,7 +50,18 @@ function buildPrimitive(M: Wasm, doc: CadDocument, params: PrimitiveParams): Man
       return buildMeshPrimitive(M, doc, params.assetId)
     case 'extrusion':
       return buildExtrusion(M, params.profile, params.height)
+    case 'revolution':
+      return buildRevolution(M, params.profile, params.degrees, params.segments)
   }
+}
+
+function buildRevolution(M: Wasm, profile: Vec2[][], degrees: number, segments: number): Manifold {
+  if (profile.length === 0 || degrees <= 0) return emptySolid(M)
+  // Revolve around the cross-section's Y axis (x=0), which becomes the Z axis.
+  const cross = new M.CrossSection(profile, 'Positive')
+  const solid = cross.revolve(segments, degrees)
+  cross.delete()
+  return solid
 }
 
 function buildExtrusion(M: Wasm, profile: Vec2[][], height: number): Manifold {

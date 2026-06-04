@@ -1,90 +1,264 @@
-/** Sketch-mode state: the parametric shapes being drawn and the extrude height. */
+/** Sketch-mode state: a constraint-based sketch + selection + view + extrude height. */
 import { create } from 'zustand'
+import { nanoid } from 'nanoid'
 import type { Vec2 } from '../document/types'
 import { useCadStore } from '../document/store'
-import type { SketchShape } from './shapes'
-import { shapeToContour } from './shapes'
+import type {
+  ConstraintId,
+  ConstraintInput,
+  PointId,
+  ShapeId,
+  SketchData,
+  SPoint,
+} from './model'
+import { emptySketch, removeShapeFromData, shapeContours, shapeIdOfPoint } from './model'
+import { solve } from './solver'
 
-export type SketchTool = 'select' | 'rectangle' | 'circle' | 'polygon'
+/** Drawing tools. `null` means Select mode (the absence of a tool). */
+export type SketchTool = 'line' | 'rectangle' | 'circle' | 'dimension'
+
+export interface View {
+  cx: number
+  cy: number
+  size: number
+}
+const DEFAULT_VIEW: View = { cx: 0, cy: 0, size: 240 }
+
+export type Ref =
+  | { t: 'point'; id: PointId }
+  | { t: 'segment'; a: PointId; b: PointId }
+  | { t: 'circle'; id: ShapeId }
+  | { t: 'constraint'; id: ConstraintId }
+
+const id = () => nanoid(8)
+
+function cloneData(d: SketchData): SketchData {
+  const points: Record<PointId, SPoint> = {}
+  for (const [k, p] of Object.entries(d.points)) points[k] = { ...p }
+  return {
+    points,
+    shapes: d.shapes.map((s) => (s.kind === 'loop' ? { ...s, pts: [...s.pts] } : { ...s })),
+    constraints: d.constraints.map((c) => ({ ...c })),
+  }
+}
 
 interface SketchState {
   active: boolean
-  tool: SketchTool
-  shapes: SketchShape[]
-  /** Polygon-in-progress vertices (only while the polygon tool is drawing). */
-  draft: Vec2[]
-  selectedIndex: number | null
+  tool: SketchTool | null
+  data: SketchData
+  selection: Ref[]
   height: number
+  view: View
+  /** What the profile becomes on commit. */
+  outputMode: 'extrude' | 'revolve'
+  /** Revolve sweep angle in degrees. */
+  degrees: number
 
   open: () => void
   cancel: () => void
-  setTool: (tool: SketchTool) => void
+  setTool: (tool: SketchTool | null) => void
   setHeight: (height: number) => void
+  setView: (view: View) => void
+  fitView: () => void
+  setOutputMode: (mode: 'extrude' | 'revolve') => void
+  setDegrees: (degrees: number) => void
 
-  addShape: (shape: SketchShape) => void
-  updateShape: (index: number, shape: SketchShape) => void
-  selectShape: (index: number | null) => void
-  deleteSelected: () => void
+  addRectangle: (x: number, y: number, w: number, h: number) => void
+  addCircle: (cx: number, cy: number, r: number) => void
+  /** Create a closed loop; entries with `coincident` get tied to an existing point. */
+  addLoop: (entries: { pos: Vec2; coincident?: PointId }[]) => void
 
-  addDraftPoint: (point: Vec2) => void
-  closeDraft: () => void
-  undoLast: () => void
-  clear: () => void
+  addConstraint: (input: ConstraintInput) => ConstraintId
+  addDistance: (a: PointId, b: PointId, value: number, offset: number) => ConstraintId
+  setDistanceValue: (cid: ConstraintId, value: number) => void
+  setCircleRadius: (shapeId: ShapeId, r: number) => void
+  setPointPos: (pid: PointId, x: number, y: number) => void
+  togglePointFixed: (ids: PointId[]) => void
 
-  /** Extrude the profile into a solid and exit sketch mode. */
+  dragPoint: (pid: PointId, x: number, y: number) => void
+
+  select: (refs: Ref[]) => void
+  clearSelection: () => void
+  deleteSelection: () => void
+
   commit: () => void
 }
 
-export const useSketchStore = create<SketchState>((set, get) => ({
-  active: false,
-  tool: 'rectangle',
-  shapes: [],
-  draft: [],
-  selectedIndex: null,
-  height: 10,
+export const useSketchStore = create<SketchState>((set, get) => {
+  const update = (fn: (d: SketchData) => void, pinned?: Set<PointId>) => {
+    const data = cloneData(get().data)
+    fn(data)
+    solve(data, pinned)
+    set({ data })
+  }
 
-  open: () => set({ active: true, shapes: [], draft: [], selectedIndex: null, tool: 'rectangle' }),
-  cancel: () => set({ active: false, shapes: [], draft: [], selectedIndex: null }),
-  setTool: (tool) =>
-    set((s) => ({
-      tool,
-      draft: tool === 'polygon' ? s.draft : [],
-      selectedIndex: tool === 'select' ? s.selectedIndex : null,
-    })),
-  setHeight: (height) => set({ height: Math.max(0.1, height) }),
+  return {
+    active: false,
+    tool: 'line',
+    data: emptySketch(),
+    selection: [],
+    height: 10,
+    view: DEFAULT_VIEW,
+    outputMode: 'extrude',
+    degrees: 360,
 
-  addShape: (shape) => set((s) => ({ shapes: [...s.shapes, shape] })),
-  updateShape: (index, shape) =>
-    set((s) => ({ shapes: s.shapes.map((sh, i) => (i === index ? shape : sh)) })),
-  selectShape: (index) => set({ selectedIndex: index }),
-  deleteSelected: () =>
-    set((s) =>
-      s.selectedIndex == null
-        ? {}
-        : { shapes: s.shapes.filter((_, i) => i !== s.selectedIndex), selectedIndex: null },
-    ),
+    open: () =>
+      set({
+        active: true,
+        data: emptySketch(),
+        selection: [],
+        tool: 'line',
+        height: 10,
+        view: DEFAULT_VIEW,
+        outputMode: 'extrude',
+        degrees: 360,
+      }),
+    cancel: () => set({ active: false, data: emptySketch(), selection: [] }),
+    setTool: (tool) => set({ tool, selection: tool === null ? get().selection : [] }),
+    setHeight: (height) => set({ height: Math.max(0.1, height) }),
+    setView: (view) => set({ view }),
+    setOutputMode: (outputMode) => set({ outputMode }),
+    setDegrees: (degrees) => set({ degrees: Math.max(1, Math.min(360, degrees)) }),
+    fitView: () =>
+      set((s) => {
+        const pts = Object.values(s.data.points)
+        if (pts.length === 0) return { view: DEFAULT_VIEW }
+        let minX = Infinity
+        let minY = Infinity
+        let maxX = -Infinity
+        let maxY = -Infinity
+        for (const p of pts) {
+          minX = Math.min(minX, p.x)
+          minY = Math.min(minY, p.y)
+          maxX = Math.max(maxX, p.x)
+          maxY = Math.max(maxY, p.y)
+        }
+        const extent = Math.max(maxX - minX, maxY - minY, 10)
+        return { view: { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, size: extent * 1.4 } }
+      }),
 
-  addDraftPoint: (point) => set((s) => ({ draft: [...s.draft, point] })),
-  closeDraft: () =>
-    set((s) =>
-      s.draft.length >= 3
-        ? { shapes: [...s.shapes, { kind: 'polygon', points: s.draft }], draft: [] }
-        : {},
-    ),
-  undoLast: () =>
-    set((s) => {
-      if (s.draft.length > 0) return { draft: s.draft.slice(0, -1) }
-      if (s.shapes.length > 0) return { shapes: s.shapes.slice(0, -1), selectedIndex: null }
-      return {}
-    }),
-  clear: () => set({ shapes: [], draft: [], selectedIndex: null }),
+    addRectangle: (x, y, w, h) =>
+      update((d) => {
+        const p0 = id()
+        const p1 = id()
+        const p2 = id()
+        const p3 = id()
+        d.points[p0] = { x, y, fixed: false }
+        d.points[p1] = { x: x + w, y, fixed: false }
+        d.points[p2] = { x: x + w, y: y + h, fixed: false }
+        d.points[p3] = { x, y: y + h, fixed: false }
+        d.shapes.push({ id: id(), kind: 'loop', pts: [p0, p1, p2, p3] })
+        d.constraints.push(
+          { id: id(), kind: 'horizontal', a: p0, b: p1 },
+          { id: id(), kind: 'horizontal', a: p3, b: p2 },
+          { id: id(), kind: 'vertical', a: p0, b: p3 },
+          { id: id(), kind: 'vertical', a: p1, b: p2 },
+        )
+      }),
 
-  commit: () => {
-    const s = get()
-    const contours: Vec2[][] = s.shapes.map(shapeToContour)
-    if (s.draft.length >= 3) contours.push(s.draft)
-    if (contours.length === 0) return
-    const created = useCadStore.getState().addExtrusion(contours, s.height)
-    if (created) set({ active: false, shapes: [], draft: [], selectedIndex: null })
-  },
-}))
+    addCircle: (cx, cy, r) =>
+      update((d) => {
+        const c = id()
+        d.points[c] = { x: cx, y: cy, fixed: false }
+        d.shapes.push({ id: id(), kind: 'circle', c, r })
+      }),
+
+    addLoop: (entries) =>
+      update((d) => {
+        const ids = entries.map((e) => {
+          const pid = id()
+          d.points[pid] = { x: e.pos[0], y: e.pos[1], fixed: false }
+          return pid
+        })
+        d.shapes.push({ id: id(), kind: 'loop', pts: ids })
+        // Merge vertices snapped onto existing points via a coincident constraint.
+        entries.forEach((e, i) => {
+          if (e.coincident && d.points[e.coincident]) {
+            d.constraints.push({ id: id(), kind: 'coincident', a: ids[i], b: e.coincident })
+          }
+        })
+      }),
+
+    addConstraint: (input) => {
+      const cid = id()
+      update((d) => {
+        d.constraints.push({ ...input, id: cid } as SketchData['constraints'][number])
+      })
+      return cid
+    },
+
+    addDistance: (a, b, value, offset) => {
+      const cid = id()
+      update((d) => {
+        d.constraints.push({ id: cid, kind: 'distance', a, b, value, offset })
+      })
+      return cid
+    },
+
+    setDistanceValue: (cid, value) =>
+      update((d) => {
+        const c = d.constraints.find((x) => x.id === cid)
+        if (c && c.kind === 'distance') c.value = Math.max(0.01, value)
+      }),
+
+    setCircleRadius: (shapeId, r) =>
+      update((d) => {
+        const s = d.shapes.find((x) => x.id === shapeId)
+        if (s && s.kind === 'circle') s.r = Math.max(0.05, r)
+      }),
+
+    setPointPos: (pid, x, y) =>
+      update((d) => {
+        const p = d.points[pid]
+        if (p) {
+          p.x = x
+          p.y = y
+        }
+      }),
+
+    togglePointFixed: (ids) =>
+      update((d) => {
+        for (const pid of ids) if (d.points[pid]) d.points[pid].fixed = !d.points[pid].fixed
+      }),
+
+    dragPoint: (pid, x, y) =>
+      update((d) => {
+        const p = d.points[pid]
+        if (p) {
+          p.x = x
+          p.y = y
+        }
+      }, new Set([pid])),
+
+    select: (refs) => set({ selection: refs }),
+    clearSelection: () => set({ selection: [] }),
+
+    deleteSelection: () => {
+      const refs = get().selection
+      if (refs.length === 0) return
+      update((d) => {
+        for (const r of refs) {
+          if (r.t === 'constraint') {
+            d.constraints = d.constraints.filter((c) => c.id !== r.id)
+          } else {
+            const shapeId = r.t === 'circle' ? r.id : shapeIdOfPoint(d, r.t === 'point' ? r.id : r.a)
+            if (shapeId) removeShapeFromData(d, shapeId)
+          }
+        }
+      })
+      set({ selection: [] })
+    },
+
+    commit: () => {
+      const s = get()
+      const contours = shapeContours(s.data)
+      if (contours.length === 0) return
+      const cad = useCadStore.getState()
+      const created =
+        s.outputMode === 'revolve'
+          ? cad.addRevolution(contours, s.degrees, 64)
+          : cad.addExtrusion(contours, s.height)
+      if (created) set({ active: false, data: emptySketch(), selection: [] })
+    },
+  }
+})
