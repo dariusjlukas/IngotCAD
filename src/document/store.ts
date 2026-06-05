@@ -134,6 +134,13 @@ function parentArray(doc: CadDocument, id: NodeId): NodeId[] | null {
   return null
 }
 
+/** The top-level (root) ancestor of `id`. */
+function rootOf(doc: CadDocument, id: NodeId): NodeId {
+  let cur = id
+  for (let p = parentNodeId(doc, cur); p; p = parentNodeId(doc, cur)) cur = p
+  return cur
+}
+
 /** Keep only ids that aren't descendants of another id in the list. */
 function topLevelOf(doc: CadDocument, ids: NodeId[]): NodeId[] {
   const set = new Set(ids)
@@ -245,6 +252,10 @@ export interface CadState {
   copyNodes: (ids: NodeId[]) => void
   /** Paste the clipboard as new root nodes, nudged + selected. */
   pasteClipboard: () => NodeId[]
+  /** Hide every root except the ones containing the given nodes. */
+  isolateNodes: (ids: NodeId[]) => void
+  /** Make every root node visible again. */
+  showAllNodes: () => void
 
   // node edits
   transformNode: (id: NodeId, transform: Transform) => void
@@ -631,6 +642,23 @@ export const useCadStore = create<CadState>()((set, get) => {
       if (created.length) get().select(created)
       return created
     },
+
+    isolateNodes: (ids) =>
+      mutate((doc) => {
+        const keep = new Set(ids.map((id) => rootOf(doc, id)))
+        for (const rid of doc.rootIds) {
+          const n = doc.nodes[rid]
+          if (n) n.visible = keep.has(rid)
+        }
+      }),
+
+    showAllNodes: () =>
+      mutate((doc) => {
+        for (const rid of doc.rootIds) {
+          const n = doc.nodes[rid]
+          if (n) n.visible = true
+        }
+      }),
 
     transformNode: (id, transform) =>
       mutate((doc) => {

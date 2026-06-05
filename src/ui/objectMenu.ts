@@ -2,6 +2,7 @@
  * outliner and the viewport so both offer the same operations. */
 import { useCadStore } from '../document/store'
 import type { NodeId } from '../document/types'
+import { frameSelected } from '../viewport/meshRegistry'
 import type { ContextMenuEntry } from './contextMenuStore'
 
 /** Operations for `ids` (assumed already selected). */
@@ -27,6 +28,8 @@ export function objectMenuEntries(ids: NodeId[]): ContextMenuEntry[] {
   }
 
   entries.push('separator')
+  entries.push({ label: 'Frame selected', onSelect: () => frameSelected() })
+  entries.push({ label: 'Isolate', onSelect: () => s.isolateNodes(ids) })
   if (single) {
     entries.push({
       label: single.visible ? 'Hide' : 'Show',

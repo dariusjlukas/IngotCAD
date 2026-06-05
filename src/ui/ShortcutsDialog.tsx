@@ -32,6 +32,13 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     ],
   },
   {
+    title: 'Selection & view',
+    items: [
+      ['F', 'Frame selected'],
+      ['Esc', 'Deselect'],
+    ],
+  },
+  {
     title: 'Help',
     items: [['?', 'Show this list']],
   },

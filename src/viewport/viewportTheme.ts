@@ -12,6 +12,8 @@ export interface ViewportTheme {
   gridMinor: string
   /** Emissive tint applied to a selected mesh. */
   selectionEmissive: string
+  /** Crisp edge-outline color drawn around a selected mesh. */
+  selectionOutline: string
   hemiSky: string
   hemiGround: string
   hemiIntensity: number
@@ -28,6 +30,7 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
     // lines at 0.75x alpha with AA, so a near-background value washes out.
     gridMinor: '#343c50',
     selectionEmissive: '#1d4ed8',
+    selectionOutline: '#8ab4ff',
     hemiSky: '#ffffff',
     hemiGround: '#3a3f4b',
     hemiIntensity: 0.65,
@@ -42,6 +45,7 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
     // dimming against the light background.
     gridMinor: '#c3cad7',
     selectionEmissive: '#2563eb',
+    selectionOutline: '#1d4ed8',
     hemiSky: '#ffffff',
     hemiGround: '#c9ccd2',
     hemiIntensity: 0.9,

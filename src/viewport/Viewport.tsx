@@ -11,6 +11,7 @@ import { faHouse } from '@fortawesome/free-solid-svg-icons'
 import { CadScene } from './CadScene'
 import { CameraController } from './CameraController'
 import { CameraRig } from './CameraRig'
+import { frameAll } from './meshRegistry'
 import { OperationPreview } from '../operation/OperationPreview'
 import { useCadStore } from '../document/store'
 import { usePrefsStore } from '../preferences/prefsStore'
@@ -98,6 +99,13 @@ export function Viewport() {
     ]
     if (s.doc.rootIds.length) {
       entries.push({ label: 'Select all', onSelect: () => s.select([...s.doc.rootIds]) })
+      entries.push('separator')
+      entries.push({ label: 'Frame all', onSelect: frameAll })
+      entries.push({
+        label: 'Show all',
+        onSelect: s.showAllNodes,
+        disabled: s.doc.rootIds.every((id) => s.doc.nodes[id]?.visible),
+      })
     }
     entries.push('separator')
     entries.push({ label: 'Reset view', onSelect: resetView })

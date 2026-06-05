@@ -12,13 +12,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import { TransformControls } from '@react-three/drei'
+import { Edges, TransformControls } from '@react-three/drei'
 import { useCadStore } from '../document/store'
 import { useViewportStore } from './viewportStore'
 import { useSketchStore } from '../sketch/sketchStore'
 import { useResolvedTheme } from '../preferences/useResolvedTheme'
 import { usePrefsStore } from '../preferences/prefsStore'
 import { VIEWPORT_THEMES } from './viewportTheme'
+import { registerMesh } from './meshRegistry'
 import { useDerivedGeometry } from './useDerivedGeometry'
 import { coplanarFacePositions } from './faceHighlight'
 import { objectToTransform, rotationDegToRadians } from '../geometry/transform'
@@ -45,11 +46,18 @@ export function NodeView({ id }: { id: NodeId }) {
   const gizmoMode = useViewportStore((s) => s.gizmoMode)
   const requestFocus = useViewportStore((s) => s.requestFocus)
   const choosing = useSketchStore((s) => s.choosing)
-  const selectionEmissive = VIEWPORT_THEMES[useResolvedTheme()].selectionEmissive
+  const vpTheme = VIEWPORT_THEMES[useResolvedTheme()]
   const smoothShading = usePrefsStore((s) => s.smoothShading)
   const geometry = useDerivedGeometry(id)
 
   const [meshObj, setMeshObj] = useState<THREE.Mesh | null>(null)
+  const [hovered, setHovered] = useState(false)
+
+  // Expose this root's mesh so "frame selected" can read its world bounds.
+  useEffect(() => {
+    registerMesh(id, meshObj)
+    return () => registerMesh(id, null)
+  }, [id, meshObj])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null)
   // Latest committed transform, for the no-op guard below.
@@ -134,10 +142,17 @@ export function NodeView({ id }: { id: NodeId }) {
     hoverTriRef.current = fi
     setHoverFace(fi >= 0 ? coplanarFacePositions(geometry, fi) : null)
   }
+  const onPointerOver = (e: ThreeEvent<PointerEvent>) => {
+    if (useSketchStore.getState().choosing) return
+    e.stopPropagation()
+    setHovered(true)
+  }
   const onPointerOut = () => {
-    if (hoverTriRef.current === -1) return
-    hoverTriRef.current = -1
-    setHoverFace(null)
+    setHovered(false)
+    if (hoverTriRef.current !== -1) {
+      hoverTriRef.current = -1
+      setHoverFace(null)
+    }
   }
 
   const onContextMenu = (e: ThreeEvent<MouseEvent>) => {
@@ -164,6 +179,7 @@ export function NodeView({ id }: { id: NodeId }) {
         onClick={onClick}
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
+        onPointerOver={onPointerOver}
         onPointerMove={onPointerMove}
         onPointerOut={onPointerOut}
       >
@@ -175,9 +191,14 @@ export function NodeView({ id }: { id: NodeId }) {
           flatShading={!smoothShading}
           roughness={0.55}
           metalness={0.1}
-          emissive={selected ? selectionEmissive : '#000000'}
-          emissiveIntensity={selected ? 0.4 : 0}
+          emissive={selected || hovered ? vpTheme.selectionEmissive : '#000000'}
+          emissiveIntensity={selected ? 0.4 : hovered ? 0.18 : 0}
         />
+        {/* Crisp feature-edge outline on the selected object (hidden while a
+            sketch plane is being chosen, where the green face highlight leads). */}
+        {selected && !choosing && (
+          <Edges threshold={20} color={vpTheme.selectionOutline} lineWidth={2.5} renderOrder={1} />
+        )}
       </mesh>
 
       {/* Hover highlight of the face that would become the sketch plane. */}

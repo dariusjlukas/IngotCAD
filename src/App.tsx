@@ -10,6 +10,8 @@ import { ShortcutsDialog } from './ui/ShortcutsDialog'
 import { Toaster } from './ui/Toaster'
 import { ContextMenuHost } from './ui/ContextMenuHost'
 import { useDialogStore } from './ui/dialogStore'
+import { useContextMenuStore } from './ui/contextMenuStore'
+import { frameSelected } from './viewport/meshRegistry'
 import { Viewport } from './viewport/Viewport'
 import { SketchCanvas } from './sketch/SketchCanvas'
 import { SketchProperties, SketchToolbar, SketchToolsPanel } from './sketch/SketchPanels'
@@ -100,11 +102,25 @@ function useKeyboardShortcuts(): void {
         useDialogStore.getState().setOpen('shortcuts')
         return
       }
+      if (e.key === 'Escape') {
+        // Let an open dialog/menu handle Escape itself; otherwise deselect.
+        if (useDialogStore.getState().open || useContextMenuStore.getState().open) return
+        if (store.selectedIds.length) {
+          e.preventDefault()
+          store.clearSelection()
+        }
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (store.selectedIds.length) {
           e.preventDefault()
           store.deleteNodes(store.selectedIds)
         }
+        return
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault()
+        frameSelected()
         return
       }
       const vp = useViewportStore.getState()
