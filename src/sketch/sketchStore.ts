@@ -4,14 +4,7 @@ import { nanoid } from 'nanoid'
 import type { NodeId, SketchSource, Vec2, Vec3 } from '../document/types'
 import { useOperationStore } from '../operation/operationStore'
 import { useCadStore } from '../document/store'
-import type {
-  ConstraintId,
-  ConstraintInput,
-  PointId,
-  ShapeId,
-  SketchData,
-  SPoint,
-} from './model'
+import type { ConstraintId, ConstraintInput, PointId, ShapeId, SketchData, SPoint } from './model'
 import { emptySketch, removeShapeFromData, shapeContours, shapeIdOfPoint } from './model'
 import { solve } from './solver'
 import type { PlaneKind, SketchPlane } from './plane'
@@ -148,11 +141,28 @@ export const useSketchStore = create<SketchState>((set, get) => {
       get().fitView()
     },
     chooseCardinal: (kind) =>
-      set({ plane: cardinalPlane(kind), planeLabel: CARDINAL_LABEL[kind], choosing: false, active: true }),
+      set({
+        plane: cardinalPlane(kind),
+        planeLabel: CARDINAL_LABEL[kind],
+        choosing: false,
+        active: true,
+      }),
     chooseFace: (point, normal) =>
-      set({ plane: planeFromFace(point, normal), planeLabel: 'Face', choosing: false, active: true }),
+      set({
+        plane: planeFromFace(point, normal),
+        planeLabel: 'Face',
+        choosing: false,
+        active: true,
+      }),
     cancel: () =>
-      set({ active: false, choosing: false, plane: null, editingNodeId: null, data: emptySketch(), selection: [] }),
+      set({
+        active: false,
+        choosing: false,
+        plane: null,
+        editingNodeId: null,
+        data: emptySketch(),
+        selection: [],
+      }),
     setTool: (tool) => set({ tool, selection: tool === null ? get().selection : [] }),
     setView: (view) => set({ view }),
     setOutputMode: (outputMode) => set({ outputMode }),
@@ -259,13 +269,16 @@ export const useSketchStore = create<SketchState>((set, get) => {
       }),
 
     dragPoint: (pid, x, y) =>
-      update((d) => {
-        const p = d.points[pid]
-        if (p) {
-          p.x = x
-          p.y = y
-        }
-      }, new Set([pid])),
+      update(
+        (d) => {
+          const p = d.points[pid]
+          if (p) {
+            p.x = x
+            p.y = y
+          }
+        },
+        new Set([pid]),
+      ),
 
     select: (refs) => set({ selection: refs }),
     clearSelection: () => set({ selection: [] }),
@@ -278,7 +291,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
           if (r.t === 'constraint') {
             d.constraints = d.constraints.filter((c) => c.id !== r.id)
           } else {
-            const shapeId = r.t === 'circle' ? r.id : shapeIdOfPoint(d, r.t === 'point' ? r.id : r.a)
+            const shapeId =
+              r.t === 'circle' ? r.id : shapeIdOfPoint(d, r.t === 'point' ? r.id : r.a)
             if (shapeId) removeShapeFromData(d, shapeId)
           }
         }
@@ -298,7 +312,14 @@ export const useSketchStore = create<SketchState>((set, get) => {
       // its current height/flip/angle. Everything downstream recomputes.
       if (s.editingNodeId) {
         useCadStore.getState().setNodeSketch(s.editingNodeId, contours, source)
-        set({ active: false, choosing: false, plane: null, editingNodeId: null, data: emptySketch(), selection: [] })
+        set({
+          active: false,
+          choosing: false,
+          plane: null,
+          editingNodeId: null,
+          data: emptySketch(),
+          selection: [],
+        })
         return
       }
 
@@ -307,11 +328,34 @@ export const useSketchStore = create<SketchState>((set, get) => {
       const op = useOperationStore.getState()
       const transform = planeToTransform(plane)
       if (s.outputMode === 'revolve') {
-        op.start({ mode: 'revolve', profile: contours, transform, segments: 64, value: 360, flip: false, sketch: source })
+        op.start({
+          mode: 'revolve',
+          profile: contours,
+          transform,
+          segments: 64,
+          value: 360,
+          flip: false,
+          sketch: source,
+        })
       } else {
-        op.start({ mode: 'extrude', profile: contours, transform, segments: 64, value: 10, flip: false, sketch: source })
+        op.start({
+          mode: 'extrude',
+          profile: contours,
+          transform,
+          segments: 64,
+          value: 10,
+          flip: false,
+          sketch: source,
+        })
       }
-      set({ active: false, choosing: false, plane: null, editingNodeId: null, data: emptySketch(), selection: [] })
+      set({
+        active: false,
+        choosing: false,
+        plane: null,
+        editingNodeId: null,
+        data: emptySketch(),
+        selection: [],
+      })
     },
   }
 })

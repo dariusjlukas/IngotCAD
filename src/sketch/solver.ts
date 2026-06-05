@@ -13,7 +13,11 @@ import type { Constraint, PointId, SketchData, SPoint } from './model'
 const POS_ITERATIONS = 160
 const ROT_RELAX = 0.5 // rotational constraints converge gently to stay stable
 
-export function solve(data: SketchData, pinned: Set<PointId> = new Set(), iterations = POS_ITERATIONS): void {
+export function solve(
+  data: SketchData,
+  pinned: Set<PointId> = new Set(),
+  iterations = POS_ITERATIONS,
+): void {
   const weight = (id: PointId): number => {
     const p = data.points[id]
     return !p || p.fixed || pinned.has(id) ? 0 : 1

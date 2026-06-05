@@ -112,7 +112,13 @@ export type PrimitiveParams =
   | { type: 'extrusion'; profile: Vec2[][]; height: number; flip?: boolean; sketch?: SketchSource }
   // A 2D sketch revolved around the Y axis (x=0) by `degrees`; that axis
   // becomes the solid's Z axis (a lathe operation).
-  | { type: 'revolution'; profile: Vec2[][]; degrees: number; segments: number; sketch?: SketchSource }
+  | {
+      type: 'revolution'
+      profile: Vec2[][]
+      degrees: number
+      segments: number
+      sketch?: SketchSource
+    }
 
 export type PrimitiveType = PrimitiveParams['type']
 

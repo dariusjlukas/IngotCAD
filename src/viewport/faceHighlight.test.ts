@@ -18,7 +18,10 @@ describe('coplanarFacePositions', () => {
     const a = new THREE.Vector3(positions[0], positions[1], positions[2])
     const b = new THREE.Vector3(positions[3], positions[4], positions[5])
     const c = new THREE.Vector3(positions[6], positions[7], positions[8])
-    const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize()
+    const normal = new THREE.Vector3()
+      .subVectors(b, a)
+      .cross(new THREE.Vector3().subVectors(c, a))
+      .normalize()
     const off = normal.dot(a)
     for (let i = 0; i < positions.length; i += 3) {
       const p = new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2])

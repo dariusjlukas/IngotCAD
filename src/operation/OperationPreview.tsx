@@ -24,7 +24,15 @@ import type { CadDocument, CadNode } from '../document/types'
 const _scratch = new THREE.Vector3()
 
 /** Keeps its children a constant on-screen size (in px) regardless of zoom/distance. */
-function ConstantSize({ position, pixels, children }: { position: [number, number, number]; pixels: number; children: ReactNode }) {
+function ConstantSize({
+  position,
+  pixels,
+  children,
+}: {
+  position: [number, number, number]
+  pixels: number
+  children: ReactNode
+}) {
   const ref = useRef<THREE.Group>(null)
   const camera = useThree((s) => s.camera)
   const viewportHeight = useThree((s) => s.size.height)
@@ -58,7 +66,11 @@ function rayAxisParam(ray: THREE.Ray, base: THREE.Vector3, dir: THREE.Vector3): 
 }
 
 /** Intersect the pointer ray with the plane through `origin` with normal `n`. */
-function rayPlaneHit(ray: THREE.Ray, origin: THREE.Vector3, n: THREE.Vector3): THREE.Vector3 | null {
+function rayPlaneHit(
+  ray: THREE.Ray,
+  origin: THREE.Vector3,
+  n: THREE.Vector3,
+): THREE.Vector3 | null {
   const denom = ray.direction.dot(n)
   if (Math.abs(denom) < 1e-6) return null
   const t = new THREE.Vector3().subVectors(origin, ray.origin).dot(n) / denom
@@ -73,13 +85,25 @@ function usePreviewGeometry(pending: PendingOp | null): THREE.BufferGeometry | n
     if (!pending) {
       ref.current?.dispose()
       ref.current = null
+      // Clearing the cached preview geometry when the op is dismissed.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setGeo(null)
       return
     }
     const params =
       pending.mode === 'extrude'
-        ? { type: 'extrusion' as const, profile: pending.profile, height: pending.value, flip: pending.flip }
-        : { type: 'revolution' as const, profile: pending.profile, degrees: pending.value, segments: pending.segments }
+        ? {
+            type: 'extrusion' as const,
+            profile: pending.profile,
+            height: pending.value,
+            flip: pending.flip,
+          }
+        : {
+            type: 'revolution' as const,
+            profile: pending.profile,
+            degrees: pending.value,
+            segments: pending.segments,
+          }
     const node: CadNode = {
       id: 'preview',
       kind: 'primitive',
@@ -119,8 +143,10 @@ export function OperationPreview() {
   const setValue = useOperationStore((s) => s.setValue)
   const setSignedValue = useOperationStore((s) => s.setSignedValue)
   const geo = usePreviewGeometry(pending)
-  // The default OrbitControls — disabled during a handle drag.
-  const controls = useThree((s) => s.controls) as { enabled?: boolean } | null
+  // Read R3F state fresh inside handlers (s.get) so we can imperatively toggle
+  // the default OrbitControls during a handle drag without mutating a value
+  // captured at render time.
+  const get = useThree((s) => s.get)
   const dragRef = useRef(false)
 
   if (!pending) return null
@@ -134,6 +160,7 @@ export function OperationPreview() {
   const vW = new THREE.Vector3(0, 1, 0).transformDirection(m).normalize()
 
   const setOrbit = (on: boolean) => {
+    const controls = get().controls as { enabled?: boolean } | null
     if (controls && 'enabled' in controls) controls.enabled = on
   }
   const beginDrag = (e: ThreeEvent<PointerEvent>) => {
@@ -190,7 +217,13 @@ export function OperationPreview() {
           scale={t.scale}
           raycast={() => null}
         >
-          <meshStandardMaterial color="#6ea8fe" transparent opacity={0.55} flatShading depthWrite={false} />
+          <meshStandardMaterial
+            color="#6ea8fe"
+            transparent
+            opacity={0.55}
+            flatShading
+            depthWrite={false}
+          />
         </mesh>
       )}
 

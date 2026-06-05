@@ -9,7 +9,27 @@
       name="description"
       content="Open-source, web-based 3D CAD for hobbyist 3D printing. Model with primitives and booleans, export watertight STL/3MF."
     />
-    <title>Ingot-CAD — 3D modeling for printing</title>
+    <title>Ingot CAD — 3D modeling for printing</title>
+    <!-- Resolve the theme before first paint to avoid a flash of the wrong
+         theme. Reads the persisted preference written by prefsStore (zustand
+         persist wraps state as { state: { theme } } under key 'ingot-prefs').
+         Keep this in sync with src/preferences/prefsStore.ts. -->
+    <script>
+      ;(function () {
+        try {
+          var raw = localStorage.getItem('ingot-prefs')
+          var theme = raw ? (JSON.parse(raw).state || {}).theme : 'system'
+          var dark =
+            theme === 'dark' ||
+            (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          var el = document.documentElement
+          el.classList.toggle('dark', dark)
+          el.classList.toggle('light', !dark)
+        } catch (e) {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

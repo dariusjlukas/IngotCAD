@@ -13,13 +13,13 @@ describe('sketch model', () => {
   })
 
   it('constraintPoints lists referenced points', () => {
-    expect(constraintPoints({ id: '1', kind: 'distance', a: 'a', b: 'b', value: 5 })).toEqual(['a', 'b'])
-    expect(constraintPoints({ id: '1', kind: 'parallel', a: 'a', b: 'b', c: 'c', d: 'd' })).toEqual([
+    expect(constraintPoints({ id: '1', kind: 'distance', a: 'a', b: 'b', value: 5 })).toEqual([
       'a',
       'b',
-      'c',
-      'd',
     ])
+    expect(constraintPoints({ id: '1', kind: 'parallel', a: 'a', b: 'b', c: 'c', d: 'd' })).toEqual(
+      ['a', 'b', 'c', 'd'],
+    )
   })
 
   it('shapeContours turns a loop into a CCW contour', () => {

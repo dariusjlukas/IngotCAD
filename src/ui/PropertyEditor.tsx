@@ -11,17 +11,30 @@ function EditSketchButton({ nodeId }: { nodeId: string }) {
     <button
       type="button"
       onClick={() => editSketch(nodeId)}
-      className="w-full rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-500"
+      className="w-full rounded bg-accent px-2 py-1 text-xs text-on-accent hover:bg-accent-hover"
     >
       ✎ Edit Sketch
     </button>
   )
 }
 
+/** The fixed-width panel chrome. Declared at module scope (not inside
+ * PropertyEditor) so it isn't recreated each render. */
+function PropertyShell({ width, children }: { width: number; children: ReactNode }) {
+  return (
+    <aside className="flex shrink-0 flex-col bg-panel" style={{ width }}>
+      <div className="border-b border-line px-3 py-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">
+        Properties
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
+    </aside>
+  )
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex items-center justify-between gap-2">
-      <span className="text-xs text-neutral-500">{label}</span>
+      <span className="text-xs text-fg-faint">{label}</span>
       <div className="w-24">{children}</div>
     </label>
   )
@@ -47,7 +60,11 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
       return (
         <div className="space-y-1.5">
           <Field label="Height">
-            <NumberField value={params.height} min={0.1} onCommit={(height) => update({ ...params, height })} />
+            <NumberField
+              value={params.height}
+              min={0.1}
+              onCommit={(height) => update({ ...params, height })}
+            />
           </Field>
           <Field label="Radius ⌀ bottom">
             <NumberField
@@ -77,7 +94,11 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
       return (
         <div className="space-y-1.5">
           <Field label="Radius">
-            <NumberField value={params.radius} min={0.1} onCommit={(radius) => update({ ...params, radius })} />
+            <NumberField
+              value={params.radius}
+              min={0.1}
+              onCommit={(radius) => update({ ...params, radius })}
+            />
           </Field>
           <Field label="Segments">
             <NumberField
@@ -93,12 +114,16 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
       return (
         <div className="space-y-1.5">
           <Field label="Height">
-            <NumberField value={params.height} min={0.1} onCommit={(height) => update({ ...params, height })} />
+            <NumberField
+              value={params.height}
+              min={0.1}
+              onCommit={(height) => update({ ...params, height })}
+            />
           </Field>
           <button
             type="button"
             onClick={() => update({ ...params, flip: !params.flip })}
-            className="w-full rounded border border-neutral-700 px-2 py-0.5 text-xs hover:bg-neutral-700"
+            className="w-full rounded border border-line-strong px-2 py-0.5 text-xs hover:bg-elevated"
           >
             Direction: {params.flip ? 'flipped (−)' : 'normal (+)'}
           </button>
@@ -127,7 +152,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
         </div>
       )
     case 'mesh':
-      return <p className="text-xs text-neutral-500">Imported mesh — no editable parameters.</p>
+      return <p className="text-xs text-fg-faint">Imported mesh — no editable parameters.</p>
   }
 }
 
@@ -142,49 +167,42 @@ export function PropertyEditor({ width }: { width: number }) {
   const setNodeColor = useCadStore((s) => s.setNodeColor)
   const setRole = useCadStore((s) => s.setRole)
 
-  const Shell = ({ children }: { children: ReactNode }) => (
-    <aside className="flex shrink-0 flex-col bg-neutral-900" style={{ width }}>
-      <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        Properties
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
-    </aside>
-  )
-
   if (!node || !id) {
     return (
-      <Shell>
-        <p className="text-sm text-neutral-500">
-          {selectedCount > 1 ? `${selectedCount} objects selected.` : 'Select a single object to edit it.'}
+      <PropertyShell width={width}>
+        <p className="text-sm text-fg-faint">
+          {selectedCount > 1
+            ? `${selectedCount} objects selected.`
+            : 'Select a single object to edit it.'}
         </p>
-      </Shell>
+      </PropertyShell>
     )
   }
 
   const t = node.transform
 
   return (
-    <Shell>
+    <PropertyShell width={width}>
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <input
             type="color"
             value={node.color}
             onChange={(e) => setNodeColor(id, e.target.value)}
-            className="h-7 w-7 shrink-0 cursor-pointer rounded border border-neutral-700 bg-transparent"
+            className="h-7 w-7 shrink-0 cursor-pointer rounded border border-line-strong bg-transparent"
             title="Color"
           />
           <input
             value={node.name}
             onChange={(e) => setNodeName(id, e.target.value)}
-            className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded bg-elevated px-2 py-1 text-sm text-fg-strong outline-none focus:ring-1 focus:ring-accent-ring"
           />
         </div>
 
         {isChild && (
           <div className="flex items-center justify-between">
-            <span className="text-xs text-neutral-500">Role in group</span>
-            <div className="flex overflow-hidden rounded border border-neutral-700">
+            <span className="text-xs text-fg-faint">Role in group</span>
+            <div className="flex overflow-hidden rounded border border-line-strong">
               {(['solid', 'hole'] as const).map((role) => (
                 <button
                   key={role}
@@ -192,7 +210,9 @@ export function PropertyEditor({ width }: { width: number }) {
                   onClick={() => setRole(id, role)}
                   className={
                     'px-2 py-0.5 text-xs capitalize ' +
-                    (node.role === role ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-800')
+                    (node.role === role
+                      ? 'bg-accent text-on-accent'
+                      : 'text-fg-muted hover:bg-elevated')
                   }
                 >
                   {role}
@@ -223,11 +243,11 @@ export function PropertyEditor({ width }: { width: number }) {
         />
 
         {node.kind === 'primitive' && (
-          <div className="border-t border-neutral-800 pt-3">
+          <div className="border-t border-line pt-3">
             <PrimitiveParamsEditor node={node} />
           </div>
         )}
       </div>
-    </Shell>
+    </PropertyShell>
   )
 }

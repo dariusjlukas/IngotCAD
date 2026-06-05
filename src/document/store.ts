@@ -112,6 +112,10 @@ export interface CadState {
   future: CadDocument[]
   /** Running counter used to name new nodes. Not part of history. */
   counter: number
+  /** Display name of the current document; drives save/export filenames. */
+  documentName: string
+  /** Whether there are unsaved changes since the last save / new / open. */
+  dirty: boolean
 
   // selection
   select: (ids: NodeId[]) => void
@@ -151,8 +155,11 @@ export interface CadState {
   setNodeSketch: (id: NodeId, profile: Vec2[][], sketch: SketchSource) => void
 
   // document
-  loadDocument: (doc: CadDocument) => void
+  loadDocument: (doc: CadDocument, name?: string) => void
   newDocument: () => void
+  setDocumentName: (name: string) => void
+  /** Mark the document as saved (clears the dirty flag). */
+  markSaved: () => void
 
   // history
   undo: () => void
@@ -169,6 +176,7 @@ export const useCadStore = create<CadState>()((set, get) => {
         doc,
         past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
         future: [],
+        dirty: true,
       }
     })
   }
@@ -208,6 +216,8 @@ export const useCadStore = create<CadState>()((set, get) => {
     past: [],
     future: [],
     counter: 0,
+    documentName: 'Untitled',
+    dirty: false,
 
     select: (ids) => set({ selectedIds: ids }),
     toggleSelect: (id) =>
@@ -444,9 +454,28 @@ export const useCadStore = create<CadState>()((set, get) => {
         }
       }),
 
-    loadDocument: (doc) => set({ doc, past: [], future: [], selectedIds: [], counter: 0 }),
+    loadDocument: (doc, name = 'Untitled') =>
+      set({
+        doc,
+        past: [],
+        future: [],
+        selectedIds: [],
+        counter: 0,
+        documentName: name,
+        dirty: false,
+      }),
     newDocument: () =>
-      set({ doc: createEmptyDocument(), past: [], future: [], selectedIds: [], counter: 0 }),
+      set({
+        doc: createEmptyDocument(),
+        past: [],
+        future: [],
+        selectedIds: [],
+        counter: 0,
+        documentName: 'Untitled',
+        dirty: false,
+      }),
+    setDocumentName: (documentName) => set({ documentName }),
+    markSaved: () => set({ dirty: false }),
 
     undo: () =>
       set((state) => {
@@ -457,6 +486,7 @@ export const useCadStore = create<CadState>()((set, get) => {
           past: state.past.slice(0, -1),
           future: [state.doc, ...state.future],
           selectedIds: state.selectedIds.filter((id) => previous.nodes[id]),
+          dirty: true,
         }
       }),
 
@@ -469,6 +499,7 @@ export const useCadStore = create<CadState>()((set, get) => {
           past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
           future: state.future.slice(1),
           selectedIds: state.selectedIds.filter((id) => next.nodes[id]),
+          dirty: true,
         }
       }),
   }

@@ -81,7 +81,9 @@ describe('document actions', () => {
     const id = store().addExtrusion(TRI, 5, IDENTITY_TRANSFORM, false, SRC)!
     expect(store().doc.featureOrder).toContain(id)
     const node = store().doc.nodes[id]
-    expect(node.kind === 'primitive' && node.params.type === 'extrusion' && Boolean(node.params.sketch)).toBe(true)
+    expect(
+      node.kind === 'primitive' && node.params.type === 'extrusion' && Boolean(node.params.sketch),
+    ).toBe(true)
   })
 
   it('setNodeSketch replaces the profile + sketch in place (keeping height)', () => {

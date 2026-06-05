@@ -1,5 +1,4 @@
-/** The main command bar: create, transform-mode, combine, edit, and file I/O. */
-import { useRef } from 'react'
+/** The modeling tool bar: create, transform-mode, combine, and quick edits. */
 import type { ReactNode } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCube, faDatabase, faCircle, faPencil } from '@fortawesome/free-solid-svg-icons'
@@ -8,10 +7,6 @@ import { selectCanRedo, selectCanUndo, selectSingleSelected } from '../document/
 import { useViewportStore } from '../viewport/viewportStore'
 import type { GizmoMode } from '../viewport/viewportStore'
 import { useSketchStore } from '../sketch/sketchStore'
-import { exportStl } from '../io/stlExport'
-import { export3mf } from '../io/threemfExport'
-import { importStlFile } from '../io/stlImport'
-import { openProjectFile, saveProject } from '../io/projectFile'
 
 function Btn({
   onClick,
@@ -34,7 +29,7 @@ function Btn({
       title={title}
       className={
         'shrink-0 rounded px-2.5 py-1 text-sm whitespace-nowrap transition-colors ' +
-        (active ? 'bg-blue-600 text-white ' : 'text-neutral-200 hover:bg-neutral-700 ') +
+        (active ? 'bg-accent text-on-accent ' : 'text-fg hover:bg-elevated ') +
         'disabled:cursor-not-allowed disabled:opacity-35'
       }
     >
@@ -49,7 +44,7 @@ function Group({ children, className = '' }: { children: ReactNode; className?: 
 }
 
 function Divider() {
-  return <div className="h-5 w-px shrink-0 bg-neutral-700" />
+  return <div className="h-5 w-px shrink-0 bg-line-strong" />
 }
 
 export function Toolbar() {
@@ -65,14 +60,10 @@ export function Toolbar() {
   const deleteNodes = useCadStore((s) => s.deleteNodes)
   const undo = useCadStore((s) => s.undo)
   const redo = useCadStore((s) => s.redo)
-  const newDocument = useCadStore((s) => s.newDocument)
 
   const gizmoMode = useViewportStore((s) => s.gizmoMode)
   const setGizmoMode = useViewportStore((s) => s.setGizmoMode)
   const openSketch = useSketchStore((s) => s.open)
-
-  const stlInputRef = useRef<HTMLInputElement>(null)
-  const projectInputRef = useRef<HTMLInputElement>(null)
 
   const multi = selectedIds.length >= 2
   const hasSelection = selectedIds.length > 0
@@ -85,11 +76,7 @@ export function Toolbar() {
   )
 
   return (
-    <div className="flex flex-wrap items-center gap-1 border-b border-neutral-800 bg-neutral-900 px-2 py-1.5">
-      <span className="mr-1 shrink-0 select-none text-sm font-semibold text-neutral-100">
-        Ingot
-      </span>
-
+    <div className="flex flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-1.5">
       <Group>
         <Btn onClick={() => addPrimitive('box')} title="Add a box">
           <FontAwesomeIcon icon={faCube} fixedWidth /> Box
@@ -116,7 +103,11 @@ export function Toolbar() {
       <Divider />
 
       <Group>
-        <Btn onClick={() => applyBoolean(selectedIds, 'union')} disabled={!multi} title="Union (combine)">
+        <Btn
+          onClick={() => applyBoolean(selectedIds, 'union')}
+          disabled={!multi}
+          title="Union (combine)"
+        >
           Union
         </Btn>
         <Btn
@@ -126,13 +117,21 @@ export function Toolbar() {
         >
           Subtract
         </Btn>
-        <Btn onClick={() => applyBoolean(selectedIds, 'intersect')} disabled={!multi} title="Intersect">
+        <Btn
+          onClick={() => applyBoolean(selectedIds, 'intersect')}
+          disabled={!multi}
+          title="Intersect"
+        >
           Intersect
         </Btn>
         <Btn onClick={() => group(selectedIds)} disabled={!multi} title="Group">
           Group
         </Btn>
-        <Btn onClick={() => selected && ungroup(selected.id)} disabled={!canUngroup} title="Ungroup">
+        <Btn
+          onClick={() => selected && ungroup(selected.id)}
+          disabled={!canUngroup}
+          title="Ungroup"
+        >
           Ungroup
         </Btn>
       </Group>
@@ -140,49 +139,16 @@ export function Toolbar() {
       <Divider />
 
       <Group>
-        <Btn onClick={undo} disabled={!canUndo} title="Undo (Ctrl/Cmd+Z)">Undo</Btn>
-        <Btn onClick={redo} disabled={!canRedo} title="Redo (Ctrl/Cmd+Shift+Z)">Redo</Btn>
+        <Btn onClick={undo} disabled={!canUndo} title="Undo (Ctrl/Cmd+Z)">
+          Undo
+        </Btn>
+        <Btn onClick={redo} disabled={!canRedo} title="Redo (Ctrl/Cmd+Shift+Z)">
+          Redo
+        </Btn>
         <Btn onClick={() => deleteNodes(selectedIds)} disabled={!hasSelection} title="Delete (Del)">
           Delete
         </Btn>
       </Group>
-
-      <Group className="ml-auto">
-        <Btn onClick={() => newDocument()} title="New project">New</Btn>
-        <Btn onClick={() => projectInputRef.current?.click()} title="Open a project (.json)">Open</Btn>
-        <Btn onClick={() => saveProject()} title="Save project (.json)">Save</Btn>
-        <Divider />
-        <Btn onClick={() => stlInputRef.current?.click()} title="Import an STL mesh">Import STL</Btn>
-        <Btn onClick={() => exportStl(useCadStore.getState().doc)} title="Export watertight STL">
-          Export STL
-        </Btn>
-        <Btn onClick={() => export3mf(useCadStore.getState().doc)} title="Export 3MF (print-ready)">
-          Export 3MF
-        </Btn>
-      </Group>
-
-      <input
-        ref={stlInputRef}
-        type="file"
-        accept=".stl"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file) void importStlFile(file)
-          e.target.value = ''
-        }}
-      />
-      <input
-        ref={projectInputRef}
-        type="file"
-        accept=".json,.hcad,.hcad.json"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file) void openProjectFile(file).catch((err) => alert(String(err)))
-          e.target.value = ''
-        }}
-      />
     </div>
   )
 }

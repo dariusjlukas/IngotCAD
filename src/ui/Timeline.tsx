@@ -26,11 +26,11 @@ export function Timeline() {
   const features = featureOrder.filter((id) => nodes[id])
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto border-t border-neutral-800 bg-neutral-900 px-2 py-1.5">
-      <span className="mr-1 shrink-0 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+    <div className="flex items-center gap-1 overflow-x-auto border-t border-line bg-panel px-2 py-1.5">
+      <span className="mr-1 shrink-0 text-xs font-semibold uppercase tracking-wide text-fg-faint">
         Timeline
       </span>
-      {features.length === 0 && <span className="text-xs text-neutral-600">no features yet</span>}
+      {features.length === 0 && <span className="text-xs text-fg-faint">no features yet</span>}
       {features.map((id) => {
         const node = nodes[id]
         const selected = selectedIds.includes(id)
@@ -45,13 +45,13 @@ export function Timeline() {
             className={
               'flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 text-xs ' +
               (selected
-                ? 'border-blue-500 bg-blue-600/30 text-white'
-                : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
+                ? 'border-accent-ring bg-selection text-fg-strong'
+                : 'border-line-strong text-fg-muted hover:bg-elevated')
             }
           >
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: node.color }} />
             {node.name}
-            {editable && <span className="text-neutral-500">✎</span>}
+            {editable && <span className="text-fg-faint">✎</span>}
           </button>
         )
       })}

@@ -10,7 +10,11 @@ function doc(...nodes: CadNode[]): CadDocument {
   return d
 }
 
-function box(id: string, size: [number, number, number], pos: [number, number, number] = [0, 0, 0]): CadNode {
+function box(
+  id: string,
+  size: [number, number, number],
+  pos: [number, number, number] = [0, 0, 0],
+): CadNode {
   return {
     id,
     kind: 'primitive',
@@ -42,8 +46,18 @@ describe('structural hashing', () => {
       transform: { ...IDENTITY_TRANSFORM },
       childIds: ['c1', 'c2'],
     }
-    const before = doc(group, box('c1', [10, 10, 10]), box('c2', [4, 4, 4]), box('root_other', [2, 2, 2]))
-    const after = doc(group, box('c1', [10, 10, 10]), box('c2', [4, 4, 9]), box('root_other', [2, 2, 2]))
+    const before = doc(
+      group,
+      box('c1', [10, 10, 10]),
+      box('c2', [4, 4, 4]),
+      box('root_other', [2, 2, 2]),
+    )
+    const after = doc(
+      group,
+      box('c1', [10, 10, 10]),
+      box('c2', [4, 4, 9]),
+      box('root_other', [2, 2, 2]),
+    )
 
     expect(localHash(after, 'root_g')).not.toBe(localHash(before, 'root_g'))
     expect(localHash(after, 'root_other')).toBe(localHash(before, 'root_other'))

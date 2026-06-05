@@ -1,5 +1,11 @@
 /** A draggable vertical divider that resizes an adjacent fixed-width panel. */
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 
 export function ResizeHandle({
   width,
@@ -18,7 +24,9 @@ export function ResizeHandle({
   const [dragging, setDragging] = useState(false)
   // Keep the latest callback without re-binding window listeners mid-drag.
   const onResizeRef = useRef(onResize)
-  onResizeRef.current = onResize
+  useEffect(() => {
+    onResizeRef.current = onResize
+  })
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
@@ -46,12 +54,12 @@ export function ResizeHandle({
   )
 
   return (
-    <div className="group relative z-10 w-px shrink-0 bg-neutral-800">
+    <div className="group relative z-10 w-px shrink-0 bg-line">
       {/* Thin centered highlight: lit while hovering, and held lit for the whole drag. */}
       <div
         className={
           'pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 transition-colors ' +
-          (dragging ? 'bg-blue-500/60' : 'group-hover:bg-blue-500/60')
+          (dragging ? 'bg-accent-ring/60' : 'group-hover:bg-accent-ring/60')
         }
       />
       {/* Wide invisible hit area so the thin line is still easy to grab. */}

@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
+import { MenuBar } from './ui/MenuBar'
 import { Toolbar } from './ui/Toolbar'
 import { ObjectList } from './ui/ObjectList'
 import { PropertyEditor } from './ui/PropertyEditor'
 import { ResizeHandle } from './ui/ResizeHandle'
 import { StatusBar } from './ui/StatusBar'
+import { SettingsDialog } from './ui/SettingsDialog'
+import { ShortcutsDialog } from './ui/ShortcutsDialog'
+import { useDialogStore } from './ui/dialogStore'
 import { Viewport } from './viewport/Viewport'
 import { SketchCanvas } from './sketch/SketchCanvas'
 import { SketchProperties, SketchToolbar, SketchToolsPanel } from './sketch/SketchPanels'
@@ -15,6 +19,9 @@ import { useCadStore } from './document/store'
 import { useViewportStore } from './viewport/viewportStore'
 import { useSketchStore } from './sketch/sketchStore'
 import { useOperationStore } from './operation/operationStore'
+import { useApplyTheme } from './preferences/useResolvedTheme'
+import { newProject, openProject, saveAs, saveProject } from './io/commands'
+import { restoreAutosave, startAutosave } from './io/autosave'
 
 function useEngineReady(): boolean {
   const [ready, setReady] = useState(engine.isReady())
@@ -34,7 +41,8 @@ function useKeyboardShortcuts(): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
+        return
       // Sketch mode and the pending-operation preview own the keyboard.
       if (useSketchStore.getState().active) return
       if (useOperationStore.getState().pending) return
@@ -50,6 +58,27 @@ function useKeyboardShortcuts(): void {
       if (meta && e.key.toLowerCase() === 'y') {
         e.preventDefault()
         store.redo()
+        return
+      }
+      if (meta && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (e.shiftKey) saveAs()
+        else saveProject()
+        return
+      }
+      if (meta && e.key.toLowerCase() === 'o') {
+        e.preventDefault()
+        openProject()
+        return
+      }
+      if (meta && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        newProject()
+        return
+      }
+      if (e.key === '?') {
+        e.preventDefault()
+        useDialogStore.getState().setOpen('shortcuts')
         return
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -75,10 +104,18 @@ export default function App() {
   const choosingPlane = useSketchStore((s) => s.choosing)
   const [leftWidth, setLeftWidth] = useState(224)
   const [rightWidth, setRightWidth] = useState(256)
+  useApplyTheme()
   useKeyboardShortcuts()
 
+  // Restore the last session, then mirror future changes to localStorage.
+  useEffect(() => {
+    restoreAutosave()
+    return startAutosave()
+  }, [])
+
   return (
-    <div className="flex h-screen w-screen flex-col bg-neutral-950 text-neutral-200">
+    <div className="flex h-screen w-screen flex-col bg-surface text-fg">
+      {!sketching && <MenuBar />}
       {sketching ? <SketchToolbar /> : <Toolbar />}
       <div className="flex min-h-0 flex-1">
         {sketching ? (
@@ -97,7 +134,7 @@ export default function App() {
           {choosingPlane && <PlanePicker />}
           <OperationConfirm />
           {!ready && !sketching && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-neutral-950/60 text-sm text-neutral-300">
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-overlay text-sm text-fg-muted">
               Loading geometry engine…
             </div>
           )}
@@ -113,6 +150,9 @@ export default function App() {
       </div>
       {!sketching && <Timeline />}
       <StatusBar />
+
+      <SettingsDialog />
+      <ShortcutsDialog />
     </div>
   )
 }

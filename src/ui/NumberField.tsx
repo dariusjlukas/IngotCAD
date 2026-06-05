@@ -49,7 +49,7 @@ export function NumberField({ value, onCommit, step = 1, min }: NumberFieldProps
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur()
       }}
-      className="w-full rounded bg-neutral-800 px-1.5 py-1 text-sm tabular-nums text-neutral-100 outline-none focus:ring-1 focus:ring-blue-500"
+      className="w-full rounded bg-elevated px-1.5 py-1 text-sm tabular-nums text-fg-strong outline-none focus:ring-1 focus:ring-accent-ring"
     />
   )
 }
@@ -67,11 +67,11 @@ const AXES = ['X', 'Y', 'Z'] as const
 export function Vec3Field({ label, value, onCommit, step, min }: Vec3FieldProps) {
   return (
     <div className="space-y-1">
-      <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">{label}</div>
+      <div className="text-xs font-medium uppercase tracking-wide text-fg-faint">{label}</div>
       <div className="flex gap-1.5">
         {AXES.map((axis, i) => (
           <label key={axis} className="flex flex-1 items-center gap-1">
-            <span className="text-xs text-neutral-500">{axis}</span>
+            <span className="text-xs text-fg-faint">{axis}</span>
             <NumberField
               value={value[i]}
               step={step}

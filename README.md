@@ -41,7 +41,7 @@ Tailwind CSS.
 
 The CAD document is **plain, serializable data** — the single source of truth.
 Everything visible (Manifold solids, three.js geometry, the rendered scene) is
-*derived* from it.
+_derived_ from it.
 
 ```
 src/

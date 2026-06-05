@@ -70,7 +70,9 @@ export function SketchCanvas() {
   // wider-than-tall area with preserveAspectRatio="meet", so the visible model
   // range is wider than view.size. We track this to extend the grid to the edges.
   const [aspect, setAspect] = useState(1)
-  const panRef = useRef<{ sx: number; sy: number; cx0: number; cy0: number; scale: number } | null>(null)
+  const panRef = useRef<{ sx: number; sy: number; cx0: number; cy0: number; scale: number } | null>(
+    null,
+  )
   const moveRef = useRef<PointId | null>(null)
   const editRef = useRef<HTMLInputElement>(null)
 
@@ -80,7 +82,8 @@ export function SketchCanvas() {
   }
   const segments = useMemo(() => {
     const segs: { a: PointId; b: PointId }[] = []
-    for (const s of data.shapes) if (s.kind === 'loop') for (const [a, b] of loopSegments(s.pts)) segs.push({ a, b })
+    for (const s of data.shapes)
+      if (s.kind === 'loop') for (const [a, b] of loopSegments(s.pts)) segs.push({ a, b })
     return segs
   }, [data.shapes])
 
@@ -192,6 +195,8 @@ export function SketchCanvas() {
     // Exclude the node being edited so we don't see its old self underneath.
     const roots = cadDoc.rootIds.filter((id) => cadDoc.nodes[id]?.visible && id !== editingNodeId)
     if (roots.length === 0) {
+      // Clear the async projection underlay when there's nothing to project.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setProjection([])
       return
     }
@@ -349,13 +354,19 @@ export function SketchCanvas() {
   const onPointerMove = (e: React.PointerEvent) => {
     if (panRef.current) {
       const { sx, sy, cx0, cy0, scale } = panRef.current
-      st.getState().setView({ cx: cx0 - (e.clientX - sx) / scale, cy: cy0 + (e.clientY - sy) / scale, size: view.size })
+      st.getState().setView({
+        cx: cx0 - (e.clientX - sx) / scale,
+        cy: cy0 + (e.clientY - sy) / scale,
+        size: view.size,
+      })
       return
     }
     const snap = toModel(e.clientX, e.clientY)
     setCursor(snap)
     // Highlight an existing point the line/dimension tools would snap to.
-    setSnapPoint(tool === 'line' || tool === 'dimension' ? hitPoint(toModelRaw(e.clientX, e.clientY)) : null)
+    setSnapPoint(
+      tool === 'line' || tool === 'dimension' ? hitPoint(toModelRaw(e.clientX, e.clientY)) : null,
+    )
     if (moveRef.current) {
       st.getState().dragPoint(moveRef.current, snap[0], snap[1])
       return
@@ -418,8 +429,10 @@ export function SketchCanvas() {
     const step = niceStep(size)
     const vs: { v: number; major: boolean }[] = []
     const hs: { v: number; major: boolean }[] = []
-    for (let x = Math.ceil(left / step) * step; x <= right; x += step) vs.push({ v: x, major: Math.round(x / step) % 5 === 0 })
-    for (let y = Math.ceil(bottom / step) * step; y <= top; y += step) hs.push({ v: y, major: Math.round(y / step) % 5 === 0 })
+    for (let x = Math.ceil(left / step) * step; x <= right; x += step)
+      vs.push({ v: x, major: Math.round(x / step) % 5 === 0 })
+    for (let y = Math.ceil(bottom / step) * step; y <= top; y += step)
+      hs.push({ v: y, major: Math.round(y / step) % 5 === 0 })
     return { left, right, bottom, top, vs, hs }
   }, [view, aspect])
 
@@ -427,15 +440,23 @@ export function SketchCanvas() {
   const vertexR = view.size * 0.0095
   const isSelPoint = (id: string) => selection.some((r) => r.t === 'point' && r.id === id)
   const isSelSeg = (a: string, b: string) =>
-    selection.some((r) => r.t === 'segment' && ((r.a === a && r.b === b) || (r.a === b && r.b === a)))
+    selection.some(
+      (r) => r.t === 'segment' && ((r.a === a && r.b === b) || (r.a === b && r.b === a)),
+    )
   const isSelCircle = (id: string) => selection.some((r) => r.t === 'circle' && r.id === id)
   const isSelConstraint = (id: string) => selection.some((r) => r.t === 'constraint' && r.id === id)
 
   const previewRect =
     drag && tool === 'rectangle'
-      ? { x: Math.min(drag.start[0], drag.current[0]), y: Math.min(drag.start[1], drag.current[1]), w: Math.abs(drag.current[0] - drag.start[0]), h: Math.abs(drag.current[1] - drag.start[1]) }
+      ? {
+          x: Math.min(drag.start[0], drag.current[0]),
+          y: Math.min(drag.start[1], drag.current[1]),
+          w: Math.abs(drag.current[0] - drag.start[0]),
+          h: Math.abs(drag.current[1] - drag.start[1]),
+        }
       : null
-  const previewCircle = drag && tool === 'circle' ? { c: drag.start, r: distance(drag.start, drag.current) } : null
+  const previewCircle =
+    drag && tool === 'circle' ? { c: drag.start, r: distance(drag.start, drag.current) } : null
 
   // dimension we're placing (follows cursor)
   const placePreview =
@@ -453,13 +474,47 @@ export function SketchCanvas() {
     const n = normal(a, b)
     const a2: Vec2 = [a[0] + n[0] * off, a[1] + n[1] * off]
     const b2: Vec2 = [b[0] + n[0] * off, b[1] + n[1] * off]
-    const mid: Vec2 = [(a2[0] + b2[0]) / 2 + n[0] * fontSize * 0.7, (a2[1] + b2[1]) / 2 + n[1] * fontSize * 0.7]
+    const mid: Vec2 = [
+      (a2[0] + b2[0]) / 2 + n[0] * fontSize * 0.7,
+      (a2[1] + b2[1]) / 2 + n[1] * fontSize * 0.7,
+    ]
     return (
       <g key={key}>
-        <line x1={a[0]} y1={-a[1]} x2={a2[0]} y2={-a2[1]} stroke={color} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
-        <line x1={b[0]} y1={-b[1]} x2={b2[0]} y2={-b2[1]} stroke={color} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
-        <line x1={a2[0]} y1={-a2[1]} x2={b2[0]} y2={-b2[1]} stroke={color} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-        <text x={mid[0]} y={-mid[1]} fontSize={fontSize} fill={color} textAnchor="middle" dominantBaseline="middle">
+        <line
+          x1={a[0]}
+          y1={-a[1]}
+          x2={a2[0]}
+          y2={-a2[1]}
+          stroke={color}
+          strokeWidth={0.75}
+          vectorEffect="non-scaling-stroke"
+        />
+        <line
+          x1={b[0]}
+          y1={-b[1]}
+          x2={b2[0]}
+          y2={-b2[1]}
+          stroke={color}
+          strokeWidth={0.75}
+          vectorEffect="non-scaling-stroke"
+        />
+        <line
+          x1={a2[0]}
+          y1={-a2[1]}
+          x2={b2[0]}
+          y2={-b2[1]}
+          stroke={color}
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+        <text
+          x={mid[0]}
+          y={-mid[1]}
+          fontSize={fontSize}
+          fill={color}
+          textAnchor="middle"
+          dominantBaseline="middle"
+        >
           {r1(value)}
         </text>
       </g>
@@ -475,6 +530,9 @@ export function SketchCanvas() {
     const n = normal(a, b)
     const off = c.offset ?? defaultOff
     const mid: Vec2 = [(a[0] + b[0]) / 2 + n[0] * off, (a[1] + b[1]) / 2 + n[1] * off]
+    // Reads the live SVG transform (a ref) to place the HTML edit box over the
+    // dimension; intentionally a render-time DOM measurement.
+    // eslint-disable-next-line react-hooks/refs
     return screenPos(mid[0], mid[1])
   })()
 
@@ -494,16 +552,50 @@ export function SketchCanvas() {
         onContextMenu={(e) => e.preventDefault()}
       >
         {grid.vs.map(({ v, major }) => (
-          <line key={`v${v}`} x1={v} y1={-grid.bottom} x2={v} y2={-grid.top} stroke={major ? '#3a4253' : '#1e222b'} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          <line
+            key={`v${v}`}
+            x1={v}
+            y1={-grid.bottom}
+            x2={v}
+            y2={-grid.top}
+            stroke={major ? '#3a4253' : '#1e222b'}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
         ))}
         {grid.hs.map(({ v, major }) => (
-          <line key={`h${v}`} x1={grid.left} y1={-v} x2={grid.right} y2={-v} stroke={major ? '#3a4253' : '#1e222b'} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          <line
+            key={`h${v}`}
+            x1={grid.left}
+            y1={-v}
+            x2={grid.right}
+            y2={-v}
+            stroke={major ? '#3a4253' : '#1e222b'}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
         ))}
         {grid.bottom <= 0 && grid.top >= 0 && (
-          <line x1={grid.left} y1={0} x2={grid.right} y2={0} stroke="#ff6188" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+          <line
+            x1={grid.left}
+            y1={0}
+            x2={grid.right}
+            y2={0}
+            stroke="#ff6188"
+            strokeWidth={1.2}
+            vectorEffect="non-scaling-stroke"
+          />
         )}
         {grid.left <= 0 && grid.right >= 0 && (
-          <line x1={0} y1={-grid.bottom} x2={0} y2={-grid.top} stroke="#7bd88f" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+          <line
+            x1={0}
+            y1={-grid.bottom}
+            x2={0}
+            y2={-grid.top}
+            stroke="#7bd88f"
+            strokeWidth={1.2}
+            vectorEffect="non-scaling-stroke"
+          />
         )}
 
         {/* Revolve mode: the Y axis (x=0) is the lathe axis; the −X half is ignored. */}
@@ -518,8 +610,22 @@ export function SketchCanvas() {
                 fill="rgba(255,97,136,0.06)"
               />
             )}
-            <line x1={0} y1={-grid.bottom} x2={0} y2={-grid.top} stroke="#7bd88f" strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
-            <text x={fontSize * 0.5} y={-(grid.top - fontSize * 1.3)} fontSize={fontSize} fill="#7bd88f" textAnchor="start">
+            <line
+              x1={0}
+              y1={-grid.bottom}
+              x2={0}
+              y2={-grid.top}
+              stroke="#7bd88f"
+              strokeWidth={2.5}
+              vectorEffect="non-scaling-stroke"
+            />
+            <text
+              x={fontSize * 0.5}
+              y={-(grid.top - fontSize * 1.3)}
+              fontSize={fontSize}
+              fill="#7bd88f"
+              textAnchor="start"
+            >
               revolve axis →
             </text>
           </>
@@ -540,27 +646,71 @@ export function SketchCanvas() {
 
         {data.shapes.map((s) =>
           s.kind === 'circle' ? (
-            <circle key={s.id} cx={pos(s.c)[0]} cy={-pos(s.c)[1]} r={s.r} fill="rgba(110,168,254,0.18)" stroke={isSelCircle(s.id) ? '#ffd866' : '#6ea8fe'} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+            <circle
+              key={s.id}
+              cx={pos(s.c)[0]}
+              cy={-pos(s.c)[1]}
+              r={s.r}
+              fill="rgba(110,168,254,0.18)"
+              stroke={isSelCircle(s.id) ? '#ffd866' : '#6ea8fe'}
+              strokeWidth={1.6}
+              vectorEffect="non-scaling-stroke"
+            />
           ) : (
-            <path key={s.id} d={path(s.pts.map(pos))} fill="rgba(110,168,254,0.16)" stroke="#6ea8fe" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+            <path
+              key={s.id}
+              d={path(s.pts.map(pos))}
+              fill="rgba(110,168,254,0.16)"
+              stroke="#6ea8fe"
+              strokeWidth={1.6}
+              vectorEffect="non-scaling-stroke"
+            />
           ),
         )}
 
-        {segments.filter((s) => isSelSeg(s.a, s.b)).map((s, i) => {
-          const a = pos(s.a)
-          const b = pos(s.b)
-          return <line key={i} x1={a[0]} y1={-a[1]} x2={b[0]} y2={-b[1]} stroke="#ffd866" strokeWidth={3} vectorEffect="non-scaling-stroke" />
-        })}
+        {segments
+          .filter((s) => isSelSeg(s.a, s.b))
+          .map((s, i) => {
+            const a = pos(s.a)
+            const b = pos(s.b)
+            return (
+              <line
+                key={i}
+                x1={a[0]}
+                y1={-a[1]}
+                x2={b[0]}
+                y2={-b[1]}
+                stroke="#ffd866"
+                strokeWidth={3}
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })}
 
         {data.constraints.map((c) =>
           c.kind === 'distance'
-            ? renderDim(pos(c.a), pos(c.b), c.offset ?? defaultOff, c.value, c.id, isSelConstraint(c.id) ? '#ffd866' : '#9fb4d8')
+            ? renderDim(
+                pos(c.a),
+                pos(c.b),
+                c.offset ?? defaultOff,
+                c.value,
+                c.id,
+                isSelConstraint(c.id) ? '#ffd866' : '#9fb4d8',
+              )
             : null,
         )}
 
         {data.shapes.map((s) =>
           s.kind === 'circle' ? (
-            <text key={`r${s.id}`} x={pos(s.c)[0]} y={-pos(s.c)[1]} fontSize={fontSize} fill="#9fb4d8" textAnchor="middle" dominantBaseline="middle">
+            <text
+              key={`r${s.id}`}
+              x={pos(s.c)[0]}
+              y={-pos(s.c)[1]}
+              fontSize={fontSize}
+              fill="#9fb4d8"
+              textAnchor="middle"
+              dominantBaseline="middle"
+            >
               ⌀{r1(s.r * 2)}
             </text>
           ) : null,
@@ -569,15 +719,37 @@ export function SketchCanvas() {
         {Object.entries(data.points).map(([id, p]) => {
           const sel = isSelPoint(id) || id === dimA
           return p.fixed ? (
-            <rect key={id} x={p.x - vertexR} y={-p.y - vertexR} width={vertexR * 2} height={vertexR * 2} fill={sel ? '#ffd866' : '#ff6188'} />
+            <rect
+              key={id}
+              x={p.x - vertexR}
+              y={-p.y - vertexR}
+              width={vertexR * 2}
+              height={vertexR * 2}
+              fill={sel ? '#ffd866' : '#ff6188'}
+            />
           ) : (
-            <circle key={id} cx={p.x} cy={-p.y} r={vertexR} fill={sel ? '#ffd866' : '#dbe4f3'} stroke={sel ? '#fff' : 'none'} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <circle
+              key={id}
+              cx={p.x}
+              cy={-p.y}
+              r={vertexR}
+              fill={sel ? '#ffd866' : '#dbe4f3'}
+              stroke={sel ? '#fff' : 'none'}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
           )
         })}
 
         {lineDraft.length > 0 && (
           <>
-            <polyline points={lineDraft.map((e) => pt(e.pos[0], e.pos[1])).join(' ')} fill="none" stroke="#ffd866" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+            <polyline
+              points={lineDraft.map((e) => pt(e.pos[0], e.pos[1])).join(' ')}
+              fill="none"
+              stroke="#ffd866"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
             {cursor && (
               <line
                 x1={lineDraft[lineDraft.length - 1].pos[0]}
@@ -591,7 +763,13 @@ export function SketchCanvas() {
               />
             )}
             {lineDraft.map((e, i) => (
-              <circle key={i} cx={e.pos[0]} cy={-e.pos[1]} r={vertexR} fill={i === 0 ? '#ffd866' : '#fff'} />
+              <circle
+                key={i}
+                cx={e.pos[0]}
+                cy={-e.pos[1]}
+                r={vertexR}
+                fill={i === 0 ? '#ffd866' : '#fff'}
+              />
             ))}
           </>
         )}
@@ -609,7 +787,15 @@ export function SketchCanvas() {
           />
         )}
 
-        {placePreview && renderDim(placePreview.a, placePreview.b, placePreview.off, placePreview.value, 'place', '#ffd866')}
+        {placePreview &&
+          renderDim(
+            placePreview.a,
+            placePreview.b,
+            placePreview.off,
+            placePreview.value,
+            'place',
+            '#ffd866',
+          )}
 
         {previewRect && previewRect.w > 0 && (
           <path
@@ -627,7 +813,16 @@ export function SketchCanvas() {
           />
         )}
         {previewCircle && previewCircle.r > 0 && (
-          <circle cx={previewCircle.c[0]} cy={-previewCircle.c[1]} r={previewCircle.r} fill="rgba(255,216,102,0.15)" stroke="#ffd866" strokeWidth={1.5} strokeDasharray="5 3" vectorEffect="non-scaling-stroke" />
+          <circle
+            cx={previewCircle.c[0]}
+            cy={-previewCircle.c[1]}
+            r={previewCircle.r}
+            fill="rgba(255,216,102,0.15)"
+            stroke="#ffd866"
+            strokeWidth={1.5}
+            strokeDasharray="5 3"
+            vectorEffect="non-scaling-stroke"
+          />
         )}
       </svg>
 
@@ -656,7 +851,8 @@ export function SketchCanvas() {
 
 function sameRef(a: Ref, b: Ref): boolean {
   if (a.t !== b.t) return false
-  if (a.t === 'segment' && b.t === 'segment') return (a.a === b.a && a.b === b.b) || (a.a === b.b && a.b === b.a)
+  if (a.t === 'segment' && b.t === 'segment')
+    return (a.a === b.a && a.b === b.b) || (a.a === b.b && a.b === b.a)
   if (a.t === 'point' && b.t === 'point') return a.id === b.id
   if (a.t === 'circle' && b.t === 'circle') return a.id === b.id
   if (a.t === 'constraint' && b.t === 'constraint') return a.id === b.id

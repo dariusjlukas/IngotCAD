@@ -146,7 +146,11 @@ export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId): Manifold {
 
   if (children.length === 0) return emptySolid(M)
   if (node.kind === 'group') return combineGroup(M, children)
-  return combineBoolean(M, children.map((c) => c.solid), node.op)
+  return combineBoolean(
+    M,
+    children.map((c) => c.solid),
+    node.op,
+  )
 }
 
 export function evaluate(M: Wasm, doc: CadDocument, id: NodeId): Manifold {
@@ -241,7 +245,11 @@ export function projectSceneRaw(
 }
 
 /** Triangle count + volume (mm³) of a subtree. */
-export function measureSolid(M: Wasm, doc: CadDocument, id: NodeId): { triangles: number; volume: number } {
+export function measureSolid(
+  M: Wasm,
+  doc: CadDocument,
+  id: NodeId,
+): { triangles: number; volume: number } {
   let solid: Manifold | null = null
   try {
     solid = evaluateLocal(M, doc, id)

@@ -16,6 +16,8 @@ import { TransformControls } from '@react-three/drei'
 import { useCadStore } from '../document/store'
 import { useViewportStore } from './viewportStore'
 import { useSketchStore } from '../sketch/sketchStore'
+import { useResolvedTheme } from '../preferences/useResolvedTheme'
+import { VIEWPORT_THEMES } from './viewportTheme'
 import { useDerivedGeometry } from './useDerivedGeometry'
 import { coplanarFacePositions } from './faceHighlight'
 import { objectToTransform, rotationDegToRadians } from '../geometry/transform'
@@ -33,15 +35,14 @@ function transformsEqual(a: Transform, b: Transform): boolean {
 export function NodeView({ id }: { id: NodeId }) {
   const node = useCadStore((s) => s.doc.nodes[id])
   const selected = useCadStore((s) => s.selectedIds.includes(id))
-  const isOnlySelected = useCadStore(
-    (s) => s.selectedIds.length === 1 && s.selectedIds[0] === id,
-  )
+  const isOnlySelected = useCadStore((s) => s.selectedIds.length === 1 && s.selectedIds[0] === id)
   const select = useCadStore((s) => s.select)
   const toggleSelect = useCadStore((s) => s.toggleSelect)
   const transformNode = useCadStore((s) => s.transformNode)
   const gizmoMode = useViewportStore((s) => s.gizmoMode)
   const requestFocus = useViewportStore((s) => s.requestFocus)
   const choosing = useSketchStore((s) => s.choosing)
+  const selectionEmissive = VIEWPORT_THEMES[useResolvedTheme()].selectionEmissive
   const geometry = useDerivedGeometry(id)
 
   const [meshObj, setMeshObj] = useState<THREE.Mesh | null>(null)
@@ -49,7 +50,9 @@ export function NodeView({ id }: { id: NodeId }) {
   const controlsRef = useRef<any>(null)
   // Latest committed transform, for the no-op guard below.
   const transformRef = useRef<Transform | undefined>(node?.transform)
-  transformRef.current = node?.transform
+  useEffect(() => {
+    transformRef.current = node?.transform
+  })
 
   // Hover-highlight of the coplanar face under the cursor (only while choosing
   // a sketch plane). `hoverTriRef` avoids recomputing when the triangle is the same.
@@ -84,6 +87,8 @@ export function NodeView({ id }: { id: NodeId }) {
   useEffect(() => {
     if (!choosing) {
       hoverTriRef.current = -1
+      // Clearing a transient highlight on mode exit; nothing to derive from.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setHoverFace(null)
     }
   }, [choosing])
@@ -149,7 +154,7 @@ export function NodeView({ id }: { id: NodeId }) {
           flatShading
           roughness={0.55}
           metalness={0.1}
-          emissive={selected ? '#1d4ed8' : '#000000'}
+          emissive={selected ? selectionEmissive : '#000000'}
           emissiveIntensity={selected ? 0.4 : 0}
         />
       </mesh>

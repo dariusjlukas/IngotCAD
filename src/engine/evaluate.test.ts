@@ -12,7 +12,11 @@ beforeAll(async () => {
   M.setup()
 })
 
-function prim(id: string, params: PrimitiveParams, pos: [number, number, number] = [0, 0, 0]): CadNode {
+function prim(
+  id: string,
+  params: PrimitiveParams,
+  pos: [number, number, number] = [0, 0, 0],
+): CadNode {
   return {
     id,
     kind: 'primitive',

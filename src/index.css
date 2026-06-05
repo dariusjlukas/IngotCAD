@@ -1,4 +1,67 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/* Dark mode is driven by a `.dark` class on <html> (set by the bootstrap script
+   in index.html and kept in sync by useApplyTheme). Enables `dark:` utilities
+   too, though the app themes via the token overrides below rather than `dark:`. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Semantic color tokens (light defaults). Components reference these as
+   bg-panel, text-fg-muted, border-line, bg-accent, … instead of literal
+   neutral/blue utilities. Tailwind emits these to :root and makes the
+   utilities reference them via var(), so overriding the same --color- names
+   under .dark re-themes the whole UI live. Dark values (below) match the
+   previous hardcoded look.
+--------------------------------------------------------------------------- */
+@theme {
+  --color-surface: #ffffff; /* app root background */
+  --color-panel: #f3f4f6; /* sidebars, toolbar, menu bar, status bar */
+  --color-elevated: #e5e7eb; /* inputs, hovered surfaces */
+  --color-overlay: rgb(255 255 255 / 0.7); /* viewport loading scrim */
+
+  --color-line: #e5e7eb; /* default 1px borders + thin dividers */
+  --color-line-strong: #d1d5db; /* stronger borders / dividers */
+
+  --color-fg: #1f2937; /* primary body text */
+  --color-fg-muted: #6b7280; /* secondary text */
+  --color-fg-faint: #9ca3af; /* labels, hints, idle icons */
+  --color-fg-strong: #111827; /* headings, active-row text */
+  --color-on-accent: #ffffff; /* text/icons on an accent fill */
+
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-ring: #3b82f6; /* focus rings */
+  --color-selection: rgb(37 99 235 / 0.15); /* selected-row tint */
+
+  --color-danger: #e11d48;
+  --color-danger-surface: rgb(244 63 94 / 0.12);
+}
+
+/* Dark overrides. `:root.dark` (specificity 0,2,0) reliably beats Tailwind's
+   themed :root defaults; unlayered, so it also wins on layer order. */
+:root.dark {
+  --color-surface: #0a0a0a; /* neutral-950 */
+  --color-panel: #171717; /* neutral-900 */
+  --color-elevated: #262626; /* neutral-800 */
+  --color-overlay: rgb(10 10 10 / 0.6);
+
+  --color-line: #262626; /* neutral-800 */
+  --color-line-strong: #404040; /* neutral-700 */
+
+  --color-fg: #e5e5e5; /* neutral-200 */
+  --color-fg-muted: #a3a3a3; /* neutral-400 */
+  --color-fg-faint: #737373; /* neutral-500 */
+  --color-fg-strong: #f5f5f5; /* neutral-100 */
+  --color-on-accent: #ffffff;
+
+  --color-accent: #2563eb; /* blue-600 */
+  --color-accent-hover: #3b82f6; /* blue-500 */
+  --color-accent-ring: #3b82f6;
+  --color-selection: rgb(37 99 235 / 0.3);
+
+  --color-danger: #fda4af; /* rose-300 */
+  --color-danger-surface: rgb(244 63 94 / 0.2);
+}
 
 html,
 body,
@@ -10,16 +73,20 @@ body,
 body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
 }
 
 /* Hide number-input spinners; values are driven by typed entry + drag. */
-input[type="number"]::-webkit-outer-spin-button,
-input[type="number"]::-webkit-inner-spin-button {
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-input[type="number"] {
+input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
 }

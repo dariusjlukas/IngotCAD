@@ -7,33 +7,35 @@ export function StatusBar() {
   const rootCount = useCadStore((s) => s.doc.rootIds.length)
   const selectedIds = useCadStore((s) => s.selectedIds)
   const doc = useCadStore((s) => s.doc)
-  const [info, setInfo] = useState<{ triangles: number; volume: number } | null>(null)
+  // Tag the measurement with the node it describes so a stale result from a
+  // previous selection is simply ignored at render time (no sync reset needed).
+  const [info, setInfo] = useState<{ id: string; triangles: number; volume: number } | null>(null)
 
   useEffect(() => {
-    if (selectedIds.length !== 1) {
-      setInfo(null)
-      return
-    }
+    if (selectedIds.length !== 1) return
+    const id = selectedIds[0]
     let cancelled = false
-    engine.measure(doc, selectedIds[0]).then((r) => {
-      if (!cancelled) setInfo(r)
+    engine.measure(doc, id).then((r) => {
+      if (!cancelled) setInfo({ id, ...r })
     })
     return () => {
       cancelled = true
     }
   }, [selectedIds, doc])
 
+  const current = selectedIds.length === 1 && info?.id === selectedIds[0] ? info : null
+
   return (
-    <div className="flex items-center gap-4 border-t border-neutral-800 bg-neutral-900 px-3 py-1 text-xs text-neutral-400">
+    <div className="flex items-center gap-4 border-t border-line bg-panel px-3 py-1 text-xs text-fg-muted">
       <span>mm · Z-up</span>
       <span>
         {rootCount} object{rootCount === 1 ? '' : 's'}
       </span>
       <div className="flex-1" />
-      {info && (
+      {current && (
         <>
-          <span>{info.triangles.toLocaleString()} triangles</span>
-          <span>{(info.volume / 1000).toFixed(2)} cm³</span>
+          <span>{current.triangles.toLocaleString()} triangles</span>
+          <span>{(current.volume / 1000).toFixed(2)} cm³</span>
         </>
       )}
     </div>

@@ -11,7 +11,9 @@ function data(points: Record<string, SPoint>, constraints: Constraint[]): Sketch
 
 describe('constraint solver', () => {
   it('satisfies a distance constraint', () => {
-    const d = data({ a: P(0, 0), b: P(10, 0) }, [{ id: 'c', kind: 'distance', a: 'a', b: 'b', value: 50 }])
+    const d = data({ a: P(0, 0), b: P(10, 0) }, [
+      { id: 'c', kind: 'distance', a: 'a', b: 'b', value: 50 },
+    ])
     solve(d)
     expect(dist(d.points.a, d.points.b)).toBeCloseTo(50, 1)
   })
@@ -26,7 +28,9 @@ describe('constraint solver', () => {
   })
 
   it('respects a temporarily pinned (dragged) point', () => {
-    const d = data({ a: P(0, 0), b: P(10, 0) }, [{ id: 'c', kind: 'distance', a: 'a', b: 'b', value: 30 }])
+    const d = data({ a: P(0, 0), b: P(10, 0) }, [
+      { id: 'c', kind: 'distance', a: 'a', b: 'b', value: 30 },
+    ])
     solve(d, new Set(['a']))
     expect(d.points.a).toEqual({ x: 0, y: 0, fixed: false })
     expect(dist(d.points.a, d.points.b)).toBeCloseTo(30, 1)
@@ -73,17 +77,14 @@ describe('constraint solver', () => {
   })
 
   it('solves a constrained rectangle to given width/height', () => {
-    const d = data(
-      { p0: P(0, 0, true), p1: P(10, 0), p2: P(10, 5), p3: P(0, 5) },
-      [
-        { id: 'h1', kind: 'horizontal', a: 'p0', b: 'p1' },
-        { id: 'h2', kind: 'horizontal', a: 'p3', b: 'p2' },
-        { id: 'v1', kind: 'vertical', a: 'p0', b: 'p3' },
-        { id: 'v2', kind: 'vertical', a: 'p1', b: 'p2' },
-        { id: 'dw', kind: 'distance', a: 'p0', b: 'p1', value: 40 },
-        { id: 'dh', kind: 'distance', a: 'p0', b: 'p3', value: 20 },
-      ],
-    )
+    const d = data({ p0: P(0, 0, true), p1: P(10, 0), p2: P(10, 5), p3: P(0, 5) }, [
+      { id: 'h1', kind: 'horizontal', a: 'p0', b: 'p1' },
+      { id: 'h2', kind: 'horizontal', a: 'p3', b: 'p2' },
+      { id: 'v1', kind: 'vertical', a: 'p0', b: 'p3' },
+      { id: 'v2', kind: 'vertical', a: 'p1', b: 'p2' },
+      { id: 'dw', kind: 'distance', a: 'p0', b: 'p1', value: 40 },
+      { id: 'dh', kind: 'distance', a: 'p0', b: 'p3', value: 20 },
+    ])
     solve(d)
     expect(d.points.p1.x).toBeCloseTo(40, 0)
     expect(d.points.p1.y).toBeCloseTo(0, 0)

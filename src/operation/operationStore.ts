@@ -42,21 +42,27 @@ export const useOperationStore = create<OperationState>((set, get) => ({
   pending: null,
   start: (op) => set({ pending: { ...op, value: clampValue(op.mode, op.value) } }),
   setValue: (value) =>
-    set((s) => (s.pending ? { pending: { ...s.pending, value: clampValue(s.pending.mode, value) } } : {})),
+    set((s) =>
+      s.pending ? { pending: { ...s.pending, value: clampValue(s.pending.mode, value) } } : {},
+    ),
   setSignedValue: (signed) =>
     set((s) => {
       if (!s.pending) return {}
       if (s.pending.mode !== 'extrude') {
         return { pending: { ...s.pending, value: clampValue('revolve', signed) } }
       }
-      return { pending: { ...s.pending, flip: signed < 0, value: clampValue('extrude', Math.abs(signed)) } }
+      return {
+        pending: { ...s.pending, flip: signed < 0, value: clampValue('extrude', Math.abs(signed)) },
+      }
     }),
-  toggleFlip: () => set((s) => (s.pending ? { pending: { ...s.pending, flip: !s.pending.flip } } : {})),
+  toggleFlip: () =>
+    set((s) => (s.pending ? { pending: { ...s.pending, flip: !s.pending.flip } } : {})),
   confirm: () => {
     const op = get().pending
     if (!op) return
     const cad = useCadStore.getState()
-    if (op.mode === 'extrude') cad.addExtrusion(op.profile, op.value, op.transform, op.flip, op.sketch)
+    if (op.mode === 'extrude')
+      cad.addExtrusion(op.profile, op.value, op.transform, op.flip, op.sketch)
     else cad.addRevolution(op.profile, op.value, op.segments, op.transform, op.sketch)
     set({ pending: null })
   },

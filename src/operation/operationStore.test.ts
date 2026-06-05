@@ -76,13 +76,29 @@ describe('operation store', () => {
         [1, 1],
       ],
     ]
-    op().start({ mode: 'extrude', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: -5, flip: false, sketch: SRC })
+    op().start({
+      mode: 'extrude',
+      profile: tri,
+      transform: IDENTITY_TRANSFORM,
+      segments: 64,
+      value: -5,
+      flip: false,
+      sketch: SRC,
+    })
     expect(op().pending?.value).toBeCloseTo(0.1)
     op().setValue(999)
     expect(op().pending?.value).toBe(999) // extrude has no upper clamp
 
     op().cancel()
-    op().start({ mode: 'revolve', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: 999, flip: false, sketch: SRC })
+    op().start({
+      mode: 'revolve',
+      profile: tri,
+      transform: IDENTITY_TRANSFORM,
+      segments: 64,
+      value: 999,
+      flip: false,
+      sketch: SRC,
+    })
     expect(op().pending?.value).toBe(360)
   })
 
@@ -94,7 +110,15 @@ describe('operation store', () => {
         [1, 1],
       ],
     ]
-    op().start({ mode: 'extrude', profile: tri, transform: IDENTITY_TRANSFORM, segments: 64, value: 5, flip: false, sketch: SRC })
+    op().start({
+      mode: 'extrude',
+      profile: tri,
+      transform: IDENTITY_TRANSFORM,
+      segments: 64,
+      value: 5,
+      flip: false,
+      sketch: SRC,
+    })
     op().setSignedValue(-12)
     expect(op().pending?.flip).toBe(true)
     expect(op().pending?.value).toBe(12)

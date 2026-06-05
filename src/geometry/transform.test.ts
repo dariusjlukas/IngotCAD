@@ -12,7 +12,12 @@ import type { Transform, Vec3 } from '../document/types'
 
 function quat(rotationDeg: Vec3): THREE.Quaternion {
   return new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(rotationDeg[0] * DEG2RAD, rotationDeg[1] * DEG2RAD, rotationDeg[2] * DEG2RAD, 'XYZ'),
+    new THREE.Euler(
+      rotationDeg[0] * DEG2RAD,
+      rotationDeg[1] * DEG2RAD,
+      rotationDeg[2] * DEG2RAD,
+      'XYZ',
+    ),
   )
 }
 
@@ -34,7 +39,11 @@ describe('transform', () => {
   })
 
   it('produces a column-major matrix with translation in slots 12-14', () => {
-    const arr = transformToMat4Array({ position: [7, 8, 9], rotationDeg: [0, 0, 0], scale: [1, 1, 1] })
+    const arr = transformToMat4Array({
+      position: [7, 8, 9],
+      rotationDeg: [0, 0, 0],
+      scale: [1, 1, 1],
+    })
     expect(arr).toHaveLength(16)
     expect(arr[12]).toBeCloseTo(7)
     expect(arr[13]).toBeCloseTo(8)
