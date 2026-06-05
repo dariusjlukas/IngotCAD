@@ -18,12 +18,9 @@ interface PrefsState {
   theme: ThemePreference
   /** Show the build-plate grid in the viewport. */
   gridEnabled: boolean
-  /** Grid extent in mm (gridHelper size). */
-  gridSize: number
 
   setTheme: (theme: ThemePreference) => void
   setGridEnabled: (gridEnabled: boolean) => void
-  setGridSize: (gridSize: number) => void
 }
 
 export const usePrefsStore = create<PrefsState>()(
@@ -31,10 +28,8 @@ export const usePrefsStore = create<PrefsState>()(
     (set) => ({
       theme: 'system',
       gridEnabled: true,
-      gridSize: 400,
       setTheme: (theme) => set({ theme }),
       setGridEnabled: (gridEnabled) => set({ gridEnabled }),
-      setGridSize: (gridSize) => set({ gridSize }),
     }),
     {
       name: 'ingot-prefs',
@@ -42,7 +37,7 @@ export const usePrefsStore = create<PrefsState>()(
       version: 1,
       // Persist data only (actions aren't serializable); also pins the stored
       // shape the index.html bootstrap script depends on.
-      partialize: (s) => ({ theme: s.theme, gridEnabled: s.gridEnabled, gridSize: s.gridSize }),
+      partialize: (s) => ({ theme: s.theme, gridEnabled: s.gridEnabled }),
     },
   ),
 )

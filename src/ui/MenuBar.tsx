@@ -3,7 +3,7 @@
  * title with an unsaved-changes dot and a quick settings control. App-level
  * commands live here; the toolbar below holds modeling tools only.
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faGear } from '@fortawesome/free-solid-svg-icons'
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from './Menu'
@@ -23,6 +23,67 @@ const THEME_OPTIONS: { id: ThemePreference; label: string }[] = [
   { id: 'dark', label: 'Dark' },
 ]
 
+/**
+ * The center-top document name. Double-click (or the File ▸ Rename… menu item,
+ * which drives `editing` from the parent) swaps it for an inline text field that
+ * commits on Enter / blur and discards on Escape. The field is uncontrolled so a
+ * rename is a single store write, not one per keystroke.
+ */
+function DocumentTitle({
+  name,
+  dirty,
+  editing,
+  onEditingChange,
+}: {
+  name: string
+  dirty: boolean
+  editing: boolean
+  onEditingChange: (editing: boolean) => void
+}) {
+  const setDocumentName = useCadStore((s) => s.setDocumentName)
+
+  const commit = (value: string) => {
+    const trimmed = value.trim()
+    if (trimmed && trimmed !== name) setDocumentName(trimmed)
+    onEditingChange(false)
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        defaultValue={name}
+        aria-label="Document name"
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => commit(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit(e.currentTarget.value)
+          else if (e.key === 'Escape') {
+            e.currentTarget.value = name // cancel: the impending blur commits nothing
+            onEditingChange(false)
+          }
+        }}
+        className="w-48 rounded bg-elevated px-1.5 py-0.5 text-center text-sm text-fg-strong outline-none focus:ring-1 focus:ring-accent-ring"
+      />
+    )
+  }
+
+  return (
+    <span
+      onDoubleClick={() => onEditingChange(true)}
+      title="Double-click to rename"
+      className="shrink-0 cursor-text select-none text-sm text-fg-muted"
+    >
+      {dirty && (
+        <span className="mr-1 text-accent" title="Unsaved changes">
+          •
+        </span>
+      )}
+      {name}
+    </span>
+  )
+}
+
 export function MenuBar() {
   const documentName = useCadStore((s) => s.documentName)
   const dirty = useCadStore((s) => s.dirty)
@@ -41,6 +102,8 @@ export function MenuBar() {
 
   const setDialog = useDialogStore((s) => s.setOpen)
 
+  const [renaming, setRenaming] = useState(false)
+
   const hasSelection = selectedIds.length > 0
 
   // Reflect the document name + unsaved state in the browser tab title.
@@ -50,7 +113,11 @@ export function MenuBar() {
 
   return (
     <div className="flex items-center gap-1 border-b border-line bg-panel px-2 py-1">
-      <img src="/icon.svg" alt="" className="ml-1 mr-1 h-5 w-5 shrink-0" />
+      <img
+        src={`${import.meta.env.BASE_URL}icon.svg`}
+        alt=""
+        className="ml-1 mr-1 h-5 w-5 shrink-0"
+      />
       <span className="mr-2 shrink-0 select-none text-sm font-semibold text-fg-strong">
         Ingot CAD
       </span>
@@ -69,6 +136,7 @@ export function MenuBar() {
         <MenuItem onSelect={saveAs} shortcut="⇧⌘S">
           Save As…
         </MenuItem>
+        <MenuItem onSelect={() => setRenaming(true)}>Rename…</MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={importStl}>Import STL…</MenuItem>
         <MenuItem
@@ -119,14 +187,12 @@ export function MenuBar() {
       </Menu>
 
       <div className="flex-1" />
-      <span className="shrink-0 select-none text-sm text-fg-muted">
-        {dirty && (
-          <span className="mr-1 text-accent" title="Unsaved changes">
-            •
-          </span>
-        )}
-        {documentName}
-      </span>
+      <DocumentTitle
+        name={documentName}
+        dirty={dirty}
+        editing={renaming}
+        onEditingChange={setRenaming}
+      />
       <div className="flex-1" />
 
       <button

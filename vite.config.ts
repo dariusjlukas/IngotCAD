@@ -4,8 +4,14 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// GitHub Pages serves project sites from /<repo>/, so the production build must
+// be based at /IngotCAD/. The deploy workflow sets GITHUB_PAGES=true; local dev,
+// preview and root/custom-domain builds stay at '/'.
+const base = process.env.GITHUB_PAGES === 'true' ? '/IngotCAD/' : '/'
+
 // https://vite.dev/config/
 export default defineConfig({
+  base,
   plugins: [
     react(),
     tailwindcss(),
@@ -24,8 +30,10 @@ export default defineConfig({
         theme_color: '#15161b',
         background_color: '#15161b',
         display: 'standalone',
-        start_url: '/',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+        // Relative URLs resolve against the manifest's own location (<base>/),
+        // so the PWA installs correctly whether served from '/' or '/IngotCAD/'.
+        start_url: '.',
+        icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
       },
     }),
   ],

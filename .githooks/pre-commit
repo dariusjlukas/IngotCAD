@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# Ingot CAD pre-commit hook.
+#
+# Refuses the commit unless Prettier formatting, ESLint, and the Vitest suite all
+# pass. Warnings count as failures (ESLint is run with --max-warnings=0).
+#
+# This hook is shared via core.hooksPath (-> .githooks). It is configured
+# automatically by `npm install` (see the "prepare" script in package.json), or
+# manually with:
+#
+#   git config core.hooksPath .githooks
+#
+# To bypass it for a single commit (use sparingly): git commit --no-verify
+
+fail() {
+  echo ""
+  echo "✗ pre-commit blocked the commit: $1"
+  exit 1
+}
+
+echo "pre-commit › formatting (prettier --check)…"
+npm run --silent format:check || fail "formatting issues found — run 'npm run format' to fix."
+
+echo "pre-commit › linting (eslint, warnings treated as errors)…"
+npm run --silent lint -- --max-warnings=0 || fail "lint errors/warnings found."
+
+echo "pre-commit › tests (vitest run)…"
+npm test --silent || fail "tests failed."
+
+echo "pre-commit › all checks passed ✓"
+exit 0

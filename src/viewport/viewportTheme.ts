@@ -24,7 +24,9 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
   dark: {
     background: '#15161b',
     gridMajor: '#46506b',
-    gridMinor: '#262a33',
+    // Brighter than you'd expect for a "minor" line: drei's Grid renders cell
+    // lines at 0.75x alpha with AA, so a near-background value washes out.
+    gridMinor: '#343c50',
     selectionEmissive: '#1d4ed8',
     hemiSky: '#ffffff',
     hemiGround: '#3a3f4b',
@@ -36,7 +38,9 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
   light: {
     background: '#eef1f5',
     gridMajor: '#aeb6c7',
-    gridMinor: '#d3d8e0',
+    // Darker than the old value so the minor lines survive drei's 0.75x cell-line
+    // dimming against the light background.
+    gridMinor: '#c3cad7',
     selectionEmissive: '#2563eb',
     hemiSky: '#ffffff',
     hemiGround: '#c9ccd2',

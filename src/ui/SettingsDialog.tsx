@@ -1,7 +1,6 @@
 /** App settings: appearance (theme), viewport (grid), and about. Modal dialog. */
 import type { ReactNode } from 'react'
 import { Modal } from './Modal'
-import { NumberField } from './NumberField'
 import { useDialogStore } from './dialogStore'
 import { usePrefsStore } from '../preferences/prefsStore'
 import type { ThemePreference } from '../preferences/prefsStore'
@@ -39,8 +38,6 @@ export function SettingsDialog() {
   const setTheme = usePrefsStore((s) => s.setTheme)
   const gridEnabled = usePrefsStore((s) => s.gridEnabled)
   const setGridEnabled = usePrefsStore((s) => s.setGridEnabled)
-  const gridSize = usePrefsStore((s) => s.gridSize)
-  const setGridSize = usePrefsStore((s) => s.setGridSize)
 
   if (open !== 'settings') return null
 
@@ -85,16 +82,6 @@ export function SettingsDialog() {
               }
             />
           </button>
-        </Row>
-        <Row label="Grid size (mm)">
-          <div className="w-24">
-            <NumberField
-              value={gridSize}
-              min={20}
-              step={20}
-              onCommit={(v) => setGridSize(Math.round(v))}
-            />
-          </div>
         </Row>
         <Row label="Units">
           <span className="text-sm text-fg">mm · Z-up</span>
