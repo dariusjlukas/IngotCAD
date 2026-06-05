@@ -62,12 +62,12 @@ src/
   document/     CSG node tree (the data model), zustand store + undo, serialization, selectors
   engine/       the ONLY code that touches Manifold (WASM): evaluate + structural hashing/caching
   geometry/     pure conversions (Manifold <-> three.js) and transforms
-  viewport/     React Three Fiber scene, per-node rendering, transform gizmo, viewport theming
+  viewport/     React Three Fiber scene, per-node rendering, transform gizmo, camera rig, theming
   sketch/       2D constraint sketcher (solver) + the SVG sketch canvas and panels
   operation/    extrude/revolve live preview + confirm UI
   io/           STL/3MF export, STL import, project save/open, autosave, shared file commands
-  preferences/  theme preference store (persisted) + theme resolution hooks
-  ui/           menu bar, toolbar, outliner, property editor, status bar, timeline, dialogs, widgets
+  preferences/  persisted prefs store (theme, grid, shading, projection) + theme resolution hooks
+  ui/           menu bar, toolbar, outliner, property editor, dialogs, toasts, context menus, widgets
 ```
 
 ## Core invariants — don't break these
@@ -102,12 +102,62 @@ src/
   editor's own palette).
 - The 3D viewport can't read CSS vars; its colors come from
   [src/viewport/viewportTheme.ts](src/viewport/viewportTheme.ts), keyed by the resolved theme.
-- Preferences (theme, grid) persist via zustand `persist` under the localStorage
-  key **`ingot-prefs`**. [index.html](index.html) has a tiny inline bootstrap
-  script that reads that key and sets the theme class **before first paint** — if
-  you change the persisted shape/key in
-  [src/preferences/prefsStore.ts](src/preferences/prefsStore.ts), update that
-  script too.
+- Preferences (theme, grid, smooth shading, camera projection) persist via
+  zustand `persist` under the localStorage key **`ingot-prefs`**.
+  [index.html](index.html) has a tiny inline bootstrap script that reads that key
+  and sets the theme class **before first paint** — if you change the persisted
+  shape/key in [src/preferences/prefsStore.ts](src/preferences/prefsStore.ts),
+  update that script too.
+
+## UI subsystems
+
+Cross-cutting UI is driven by small zustand stores in `src/ui/`, each rendered
+once near the App root. Call their imperative helpers from anywhere:
+
+- **Toasts** — `toast.success(msg)` / `.error(msg)` / `.info(msg)` from
+  [src/ui/toastStore.ts](src/ui/toastStore.ts), shown by `<Toaster>`. **Use these
+  for user-facing success/failure — never `alert()`.** File commands already do
+  ([src/io/commands.ts](src/io/commands.ts)).
+- **Context menu** — `openContextMenu(x, y, items)` from
+  [src/ui/contextMenuStore.ts](src/ui/contextMenuStore.ts), rendered by
+  `<ContextMenuHost>`. Object-operation entries are built once by
+  [src/ui/objectMenu.ts](src/ui/objectMenu.ts) and reused by the outliner and the
+  viewport. The viewport uses the store's `markObjectMenuHandled` /
+  `noteRightButtonDown` / `rightButtonDragged` guards so an object right-click
+  doesn't also open the empty-space menu and a right-drag (orbit pan) doesn't open
+  a menu at all.
+- **Dialogs** — single open dialog id in
+  [src/ui/dialogStore.ts](src/ui/dialogStore.ts) (`settings` | `shortcuts`).
+
+## Object operations (outliner + viewport)
+
+These live on the CAD store ([src/document/store.ts](src/document/store.ts)) and
+go through `mutate` (so they're undoable):
+
+- `duplicateNodes` / `copyNodes` + `pasteClipboard` — deep subtree clones with
+  fresh ids. The in-app `clipboard` is transient store state (NOT undo/serialized).
+  Cloning uses `structuredClone`, so the **source must be the live doc, never an
+  immer draft** (drafts are Proxies and won't clone); see `cloneSubtree`.
+- `moveNodes(ids, targetId, 'before' | 'after' | 'inside')` — the outliner's
+  drag-to-reorder/reparent. It preserves each node's **world pose** (recomputes
+  the local transform under the new parent) and refuses to drop a node into its
+  own subtree. Tests: [src/document/treeOps.test.ts](src/document/treeOps.test.ts).
+- Mesh-asset note: clones share/copy `assetId` (assets are immutable and never
+  GC'd), so deleting an original never strands a duplicate.
+
+## Camera
+
+- Projection (`perspective` | `orthographic`) is a persisted pref.
+  [src/viewport/CameraRig.tsx](src/viewport/CameraRig.tsx) owns the camera and, on
+  a projection swap, reproduces the prior **framing** (target, view direction, and
+  the world height visible at the target) so the view doesn't jump.
+- View presets (Top/Front/Right/Iso), home/reset, and double-click focus are
+  **nonce-bumped requests** on [src/viewport/viewportStore.ts](src/viewport/viewportStore.ts),
+  animated by [src/viewport/CameraController.tsx](src/viewport/CameraController.tsx)
+  (one `useFrame` fly-to loop). Bump the nonce to re-fire the same request.
+- To read/mutate the live R3F camera in an effect or handler, read it fresh via
+  `const get = useThree((s) => s.get)` then `get().camera` — the `immutability`
+  lint rule forbids mutating the hook-returned `camera`/`controls` directly.
 
 ## Gotchas
 

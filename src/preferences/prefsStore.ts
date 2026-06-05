@@ -12,15 +12,25 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type ThemePreference = 'system' | 'light' | 'dark'
+export type CameraProjection = 'perspective' | 'orthographic'
 
 interface PrefsState {
   /** Appearance: follow the OS, or force light/dark. */
   theme: ThemePreference
   /** Show the build-plate grid in the viewport. */
   gridEnabled: boolean
+  /**
+   * Smooth (auto-smooth) shading: average vertex normals across soft edges while
+   * keeping sharp edges crisp (like Blender's "Smooth by Angle"). Off = faceted.
+   */
+  smoothShading: boolean
+  /** Camera projection for the viewport. */
+  projection: CameraProjection
 
   setTheme: (theme: ThemePreference) => void
   setGridEnabled: (gridEnabled: boolean) => void
+  setSmoothShading: (smoothShading: boolean) => void
+  setProjection: (projection: CameraProjection) => void
 }
 
 export const usePrefsStore = create<PrefsState>()(
@@ -28,8 +38,12 @@ export const usePrefsStore = create<PrefsState>()(
     (set) => ({
       theme: 'system',
       gridEnabled: true,
+      smoothShading: false,
+      projection: 'perspective',
       setTheme: (theme) => set({ theme }),
       setGridEnabled: (gridEnabled) => set({ gridEnabled }),
+      setSmoothShading: (smoothShading) => set({ smoothShading }),
+      setProjection: (projection) => set({ projection }),
     }),
     {
       name: 'ingot-prefs',
@@ -37,7 +51,12 @@ export const usePrefsStore = create<PrefsState>()(
       version: 1,
       // Persist data only (actions aren't serializable); also pins the stored
       // shape the index.html bootstrap script depends on.
-      partialize: (s) => ({ theme: s.theme, gridEnabled: s.gridEnabled }),
+      partialize: (s) => ({
+        theme: s.theme,
+        gridEnabled: s.gridEnabled,
+        smoothShading: s.smoothShading,
+        projection: s.projection,
+      }),
     },
   ),
 )

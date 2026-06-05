@@ -7,6 +7,7 @@
  * Worker later (typed arrays are transferable).
  */
 import * as THREE from 'three'
+import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js'
 
 export interface RawMesh {
   /** Flat xyz positions: [x0,y0,z0, x1,y1,z1, ...]. */
@@ -20,12 +21,32 @@ export const EMPTY_MESH: RawMesh = {
   index: new Uint32Array(0),
 }
 
-export function rawMeshToGeometry(raw: RawMesh): THREE.BufferGeometry {
+/**
+ * Crease angle for auto-smooth shading: edges sharper than this stay faceted,
+ * softer ones get averaged normals — like Blender's "Smooth by Angle". 30° keeps
+ * box corners and chamfers crisp while smoothing cylinders, spheres, and fillets.
+ */
+const SMOOTH_CREASE_ANGLE = THREE.MathUtils.degToRad(30)
+
+export function rawMeshToGeometry(raw: RawMesh, smoothShading = false): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.BufferAttribute(raw.position, 3))
   geometry.setIndex(new THREE.BufferAttribute(raw.index, 1))
-  // Materials use flatShading, but normals are still computed so the geometry
-  // is correct under any material and for lighting that reads vertex normals.
+
+  if (smoothShading) {
+    // Auto-smooth: bake creased normals so the material can read them directly
+    // (flatShading off). toCreasedNormals returns a NEW non-indexed geometry, so
+    // drop the indexed source we built above.
+    const creased = toCreasedNormals(geometry, SMOOTH_CREASE_ANGLE)
+    geometry.dispose()
+    creased.computeBoundingBox()
+    creased.computeBoundingSphere()
+    return creased
+  }
+
+  // Flat shading: the material derives per-face normals (flatShading), but we
+  // still compute vertex normals so the geometry is correct under any material
+  // and for lighting that reads vertex normals.
   geometry.computeVertexNormals()
   geometry.computeBoundingBox()
   geometry.computeBoundingSphere()

@@ -17,11 +17,14 @@ import { useCadStore } from '../document/store'
 import { useViewportStore } from './viewportStore'
 import { useSketchStore } from '../sketch/sketchStore'
 import { useResolvedTheme } from '../preferences/useResolvedTheme'
+import { usePrefsStore } from '../preferences/prefsStore'
 import { VIEWPORT_THEMES } from './viewportTheme'
 import { useDerivedGeometry } from './useDerivedGeometry'
 import { coplanarFacePositions } from './faceHighlight'
 import { objectToTransform, rotationDegToRadians } from '../geometry/transform'
 import type { NodeId, Transform } from '../document/types'
+import { markObjectMenuHandled, openContextMenu, rightButtonDragged } from '../ui/contextMenuStore'
+import { objectMenuEntries } from '../ui/objectMenu'
 
 function transformsEqual(a: Transform, b: Transform): boolean {
   const eq = (x: number, y: number) => Math.abs(x - y) < 1e-6
@@ -43,6 +46,7 @@ export function NodeView({ id }: { id: NodeId }) {
   const requestFocus = useViewportStore((s) => s.requestFocus)
   const choosing = useSketchStore((s) => s.choosing)
   const selectionEmissive = VIEWPORT_THEMES[useResolvedTheme()].selectionEmissive
+  const smoothShading = usePrefsStore((s) => s.smoothShading)
   const geometry = useDerivedGeometry(id)
 
   const [meshObj, setMeshObj] = useState<THREE.Mesh | null>(null)
@@ -136,6 +140,19 @@ export function NodeView({ id }: { id: NodeId }) {
     setHoverFace(null)
   }
 
+  const onContextMenu = (e: ThreeEvent<MouseEvent>) => {
+    if (useSketchStore.getState().choosing) return
+    const native = e.nativeEvent
+    if (rightButtonDragged(native.clientX, native.clientY)) return // was an orbit pan, not a click
+    e.stopPropagation()
+    native.preventDefault()
+    markObjectMenuHandled()
+    const store = useCadStore.getState()
+    const ids = store.selectedIds.includes(id) ? store.selectedIds : [id]
+    if (!store.selectedIds.includes(id)) store.select([id])
+    openContextMenu(native.clientX, native.clientY, objectMenuEntries(ids))
+  }
+
   return (
     <>
       <mesh
@@ -146,12 +163,16 @@ export function NodeView({ id }: { id: NodeId }) {
         scale={node.transform.scale}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
         onPointerMove={onPointerMove}
         onPointerOut={onPointerOut}
       >
         <meshStandardMaterial
+          // Toggling flatShading recompiles the shader; remount via key so the
+          // new program is built from scratch rather than relying on needsUpdate.
+          key={smoothShading ? 'smooth' : 'flat'}
           color={node.color}
-          flatShading
+          flatShading={!smoothShading}
           roughness={0.55}
           metalness={0.1}
           emissive={selected ? selectionEmissive : '#000000'}

@@ -31,6 +31,37 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean
+  onChange: (value: boolean) => void
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={
+        'relative h-5 w-9 shrink-0 rounded-full transition-colors ' +
+        (checked ? 'bg-accent' : 'bg-line-strong')
+      }
+    >
+      <span
+        className={
+          'absolute top-0.5 h-4 w-4 rounded-full bg-on-accent transition-all ' +
+          (checked ? 'left-[18px]' : 'left-0.5')
+        }
+      />
+    </button>
+  )
+}
+
 export function SettingsDialog() {
   const open = useDialogStore((s) => s.open)
   const setOpen = useDialogStore((s) => s.setOpen)
@@ -38,6 +69,8 @@ export function SettingsDialog() {
   const setTheme = usePrefsStore((s) => s.setTheme)
   const gridEnabled = usePrefsStore((s) => s.gridEnabled)
   const setGridEnabled = usePrefsStore((s) => s.setGridEnabled)
+  const smoothShading = usePrefsStore((s) => s.smoothShading)
+  const setSmoothShading = usePrefsStore((s) => s.setSmoothShading)
 
   if (open !== 'settings') return null
 
@@ -65,23 +98,10 @@ export function SettingsDialog() {
 
       <Section title="Viewport">
         <Row label="Show build-plate grid">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={gridEnabled}
-            onClick={() => setGridEnabled(!gridEnabled)}
-            className={
-              'relative h-5 w-9 shrink-0 rounded-full transition-colors ' +
-              (gridEnabled ? 'bg-accent' : 'bg-line-strong')
-            }
-          >
-            <span
-              className={
-                'absolute top-0.5 h-4 w-4 rounded-full bg-on-accent transition-all ' +
-                (gridEnabled ? 'left-[18px]' : 'left-0.5')
-              }
-            />
-          </button>
+          <Toggle checked={gridEnabled} onChange={setGridEnabled} label="Show build-plate grid" />
+        </Row>
+        <Row label="Smooth shading">
+          <Toggle checked={smoothShading} onChange={setSmoothShading} label="Smooth shading" />
         </Row>
         <Row label="Units">
           <span className="text-sm text-fg">mm · Z-up</span>

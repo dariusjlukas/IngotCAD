@@ -10,10 +10,12 @@ import type * as THREE from 'three'
 import { engine } from '../engine/engine'
 import { rawMeshToGeometry } from '../geometry/manifoldToThree'
 import { useCadStore } from '../document/store'
+import { usePrefsStore } from '../preferences/prefsStore'
 import { localHash } from '../engine/hash'
 
 export function useDerivedGeometry(id: string): THREE.BufferGeometry | null {
   const doc = useCadStore((s) => s.doc)
+  const smoothShading = usePrefsStore((s) => s.smoothShading)
   const hash = useMemo(() => localHash(doc, id), [doc, id])
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null)
   const geoRef = useRef<THREE.BufferGeometry | null>(null)
@@ -22,7 +24,7 @@ export function useDerivedGeometry(id: string): THREE.BufferGeometry | null {
     let cancelled = false
     engine.computeMesh(doc, id).then((raw) => {
       if (cancelled) return
-      const geo = rawMeshToGeometry(raw)
+      const geo = rawMeshToGeometry(raw, smoothShading)
       geoRef.current?.dispose()
       geoRef.current = geo
       setGeometry(geo)
@@ -30,9 +32,10 @@ export function useDerivedGeometry(id: string): THREE.BufferGeometry | null {
     return () => {
       cancelled = true
     }
-    // `doc`/`id` are read fresh inside the closure; only `hash` should retrigger.
+    // `doc`/`id` are read fresh inside the closure; rebuild only when the
+    // structural hash or the shading mode changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hash])
+  }, [hash, smoothShading])
 
   useEffect(
     () => () => {

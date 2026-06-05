@@ -12,10 +12,16 @@ import { useCadStore } from '../document/store'
 import { selectCanRedo, selectCanUndo } from '../document/selectors'
 import { usePrefsStore } from '../preferences/prefsStore'
 import type { ThemePreference } from '../preferences/prefsStore'
-import { exportStl } from '../io/stlExport'
-import { export3mf } from '../io/threemfExport'
-import { projectFilename } from '../io/projectFile'
-import { importStl, newProject, openProject, saveAs, saveProject } from '../io/commands'
+import { useViewportStore } from '../viewport/viewportStore'
+import {
+  export3mfFile,
+  exportStlFile,
+  importStl,
+  newProject,
+  openProject,
+  saveAs,
+  saveProject,
+} from '../io/commands'
 
 const THEME_OPTIONS: { id: ThemePreference; label: string }[] = [
   { id: 'system', label: 'System' },
@@ -94,11 +100,20 @@ export function MenuBar() {
   const undo = useCadStore((s) => s.undo)
   const redo = useCadStore((s) => s.redo)
   const deleteNodes = useCadStore((s) => s.deleteNodes)
+  const duplicateNodes = useCadStore((s) => s.duplicateNodes)
+  const copyNodes = useCadStore((s) => s.copyNodes)
+  const pasteClipboard = useCadStore((s) => s.pasteClipboard)
+  const clipboard = useCadStore((s) => s.clipboard)
 
   const theme = usePrefsStore((s) => s.theme)
   const setTheme = usePrefsStore((s) => s.setTheme)
   const gridEnabled = usePrefsStore((s) => s.gridEnabled)
   const setGridEnabled = usePrefsStore((s) => s.setGridEnabled)
+  const smoothShading = usePrefsStore((s) => s.smoothShading)
+  const setSmoothShading = usePrefsStore((s) => s.setSmoothShading)
+  const projection = usePrefsStore((s) => s.projection)
+  const setProjection = usePrefsStore((s) => s.setProjection)
+  const setView = useViewportStore((s) => s.setView)
 
   const setDialog = useDialogStore((s) => s.setOpen)
 
@@ -139,16 +154,8 @@ export function MenuBar() {
         <MenuItem onSelect={() => setRenaming(true)}>Rename…</MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={importStl}>Import STL…</MenuItem>
-        <MenuItem
-          onSelect={() => void exportStl(useCadStore.getState().doc, projectFilename('stl'))}
-        >
-          Export STL
-        </MenuItem>
-        <MenuItem
-          onSelect={() => void export3mf(useCadStore.getState().doc, projectFilename('3mf'))}
-        >
-          Export 3MF
-        </MenuItem>
+        <MenuItem onSelect={() => void exportStlFile()}>Export STL</MenuItem>
+        <MenuItem onSelect={() => void export3mfFile()}>Export 3MF</MenuItem>
       </Menu>
 
       <Menu label="Edit">
@@ -157,6 +164,20 @@ export function MenuBar() {
         </MenuItem>
         <MenuItem onSelect={redo} disabled={!canRedo} shortcut="⇧⌘Z">
           Redo
+        </MenuItem>
+        <MenuSeparator />
+        <MenuItem
+          onSelect={() => duplicateNodes(selectedIds)}
+          disabled={!hasSelection}
+          shortcut="⌘D"
+        >
+          Duplicate
+        </MenuItem>
+        <MenuItem onSelect={() => copyNodes(selectedIds)} disabled={!hasSelection} shortcut="⌘C">
+          Copy
+        </MenuItem>
+        <MenuItem onSelect={() => pasteClipboard()} disabled={!clipboard} shortcut="⌘V">
+          Paste
         </MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={() => deleteNodes(selectedIds)} disabled={!hasSelection} shortcut="⌫">
@@ -175,6 +196,27 @@ export function MenuBar() {
         <MenuItem onSelect={() => setGridEnabled(!gridEnabled)} checked={gridEnabled}>
           Show grid
         </MenuItem>
+        <MenuItem onSelect={() => setSmoothShading(!smoothShading)} checked={smoothShading}>
+          Smooth shading
+        </MenuItem>
+        <MenuSeparator />
+        <MenuLabel>Camera</MenuLabel>
+        <MenuItem
+          checked={projection === 'perspective'}
+          onSelect={() => setProjection('perspective')}
+        >
+          Perspective
+        </MenuItem>
+        <MenuItem
+          checked={projection === 'orthographic'}
+          onSelect={() => setProjection('orthographic')}
+        >
+          Orthographic
+        </MenuItem>
+        <MenuItem onSelect={() => setView([0, 0.001, 1])}>Top view</MenuItem>
+        <MenuItem onSelect={() => setView([0, -1, 0])}>Front view</MenuItem>
+        <MenuItem onSelect={() => setView([1, 0, 0])}>Right view</MenuItem>
+        <MenuItem onSelect={() => setView([1, -1, 1])}>Isometric</MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={() => setDialog('settings')}>Settings…</MenuItem>
       </Menu>

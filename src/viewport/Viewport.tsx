@@ -10,12 +10,20 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faHouse } from '@fortawesome/free-solid-svg-icons'
 import { CadScene } from './CadScene'
 import { CameraController } from './CameraController'
+import { CameraRig } from './CameraRig'
 import { OperationPreview } from '../operation/OperationPreview'
 import { useCadStore } from '../document/store'
 import { usePrefsStore } from '../preferences/prefsStore'
 import { useResolvedTheme } from '../preferences/useResolvedTheme'
 import { VIEWPORT_THEMES } from './viewportTheme'
 import { DEFAULT_CAMERA_POSITION, useViewportStore } from './viewportStore'
+import {
+  noteRightButtonDown,
+  openContextMenu,
+  rightButtonDragged,
+  wasObjectMenuHandled,
+  type ContextMenuEntry,
+} from '../ui/contextMenuStore'
 
 /**
  * An endless build-plate grid. Rather than a giant mesh, this is a modestly
@@ -31,9 +39,9 @@ import { DEFAULT_CAMERA_POSITION, useViewportStore } from './viewportStore'
  * rotating +90° about X lands it on Z=0.
  */
 const GRID_EXTENT = 20000 // mm; plane size — comfortably larger than FADE_MAX
-const FADE_ZOOM_FACTOR = 3 // fade radius ≈ this × the camera's orbit distance
-const FADE_MIN = 40 // mm; keep some grid visible when zoomed in very close
-const FADE_MAX = 6000 // mm; stay well inside the plane and the camera far clip
+const FADE_ZOOM_FACTOR = 4.5 // fade radius ≈ this × the camera's orbit distance
+const FADE_MIN = 60 // mm; keep some grid visible when zoomed in very close
+const FADE_MAX = 9000 // mm; stay well inside the plane and the camera far clip
 
 function BuildPlateGrid({ cellColor, sectionColor }: { cellColor: string; sectionColor: string }) {
   const ref = useRef<THREE.Mesh>(null)
@@ -79,8 +87,31 @@ export function Viewport() {
   const theme = VIEWPORT_THEMES[useResolvedTheme()]
   const gridEnabled = usePrefsStore((s) => s.gridEnabled)
 
+  const onViewportContextMenu = (e: React.MouseEvent) => {
+    // Object right-clicks are handled by the meshes; bail if one just did, or if
+    // this was an orbit pan rather than a click.
+    if (wasObjectMenuHandled() || rightButtonDragged(e.clientX, e.clientY)) return
+    e.preventDefault()
+    const s = useCadStore.getState()
+    const entries: ContextMenuEntry[] = [
+      { label: 'Paste', onSelect: () => s.pasteClipboard(), disabled: !s.clipboard },
+    ]
+    if (s.doc.rootIds.length) {
+      entries.push({ label: 'Select all', onSelect: () => s.select([...s.doc.rootIds]) })
+    }
+    entries.push('separator')
+    entries.push({ label: 'Reset view', onSelect: resetView })
+    openContextMenu(e.clientX, e.clientY, entries)
+  }
+
   return (
-    <div className="relative h-full w-full">
+    <div
+      className="relative h-full w-full"
+      onPointerDown={(e) => {
+        if (e.button === 2) noteRightButtonDown(e.clientX, e.clientY)
+      }}
+      onContextMenu={onViewportContextMenu}
+    >
       <Canvas
         // On-demand rendering: only paint frames when something actually changes
         // (camera move, geometry edit, hover, theme) rather than a continuous
@@ -88,7 +119,13 @@ export function Viewport() {
         // damping) and the gizmo self-schedule via invalidate(); CameraController's
         // fly-to animation invalidates itself while active.
         frameloop="demand"
-        camera={{ position: DEFAULT_CAMERA_POSITION, up: [0, 0, 1], fov: 45, near: 0.1, far: 8000 }}
+        camera={{
+          position: DEFAULT_CAMERA_POSITION,
+          up: [0, 0, 1],
+          fov: 45,
+          near: 0.1,
+          far: 10000,
+        }}
         gl={{ antialias: true }}
         dpr={[1, 2]}
         onPointerMissed={() => clearSelection()}
@@ -106,8 +143,15 @@ export function Viewport() {
         <CadScene />
         <OperationPreview />
 
+        <CameraRig />
         <CameraController />
-        <OrbitControls makeDefault enableDamping dampingFactor={0.12} />
+        <OrbitControls
+          makeDefault
+          enableDamping
+          dampingFactor={0.12}
+          minDistance={5}
+          maxDistance={4000}
+        />
         <GizmoHelper alignment="bottom-right" margin={[72, 72]}>
           <GizmoViewport axisColors={['#ff6188', '#7bd88f', '#6ea8fe']} labelColor="#ffffff" />
         </GizmoHelper>

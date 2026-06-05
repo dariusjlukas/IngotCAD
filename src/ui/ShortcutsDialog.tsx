@@ -17,6 +17,9 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['⌘Z', 'Undo'],
       ['⇧⌘Z', 'Redo'],
+      ['⌘D', 'Duplicate'],
+      ['⌘C', 'Copy'],
+      ['⌘V', 'Paste'],
       ['⌫', 'Delete selection'],
     ],
   },

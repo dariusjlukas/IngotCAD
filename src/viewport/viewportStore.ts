@@ -14,6 +14,13 @@ export interface FocusTarget {
   nonce: number
 }
 
+/** A request to look along a direction (a Top/Front/Right/Iso preset). */
+export interface ViewRequest {
+  /** Direction from the target to the camera (need not be normalized). */
+  dir: [number, number, number]
+  nonce: number
+}
+
 interface ViewportState {
   gizmoMode: GizmoMode
   setGizmoMode: (mode: GizmoMode) => void
@@ -22,6 +29,9 @@ interface ViewportState {
   /** Bumped to ask the camera to fly back to the home view (0 means "never"). */
   resetNonce: number
   resetView: () => void
+  /** A pending request to snap the camera to a named view direction. */
+  viewRequest: ViewRequest | null
+  setView: (dir: [number, number, number]) => void
 }
 
 export const useViewportStore = create<ViewportState>((set) => ({
@@ -32,4 +42,6 @@ export const useViewportStore = create<ViewportState>((set) => ({
     set((s) => ({ focusTarget: { center, radius, nonce: (s.focusTarget?.nonce ?? 0) + 1 } })),
   resetNonce: 0,
   resetView: () => set((s) => ({ resetNonce: s.resetNonce + 1 })),
+  viewRequest: null,
+  setView: (dir) => set((s) => ({ viewRequest: { dir, nonce: (s.viewRequest?.nonce ?? 0) + 1 } })),
 }))

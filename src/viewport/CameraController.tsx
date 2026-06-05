@@ -26,6 +26,7 @@ export function CameraController() {
   const invalidate = useThree((s) => s.invalidate)
   const focusTarget = useViewportStore((s) => s.focusTarget)
   const resetNonce = useViewportStore((s) => s.resetNonce)
+  const viewRequest = useViewportStore((s) => s.viewRequest)
 
   const anim = useRef({
     active: false,
@@ -75,6 +76,25 @@ export function CameraController() {
     invalidate() // kick off the on-demand render loop for the fly-back
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetNonce])
+
+  // Snap to a named view (Top/Front/Right/Iso): keep the target + distance, just
+  // rotate the camera to look along the requested direction.
+  useEffect(() => {
+    if (!viewRequest || !controls) return
+    const dir = new THREE.Vector3(...viewRequest.dir)
+    if (dir.lengthSq() < 1e-9) return
+    dir.normalize()
+    const distance = camera.position.distanceTo(controls.target) || 200
+    const a = anim.current
+    a.fromPos.copy(camera.position)
+    a.toPos.copy(controls.target).addScaledVector(dir, distance)
+    a.fromTarget.copy(controls.target)
+    a.toTarget.copy(controls.target)
+    a.t = 0
+    a.active = true
+    invalidate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewRequest?.nonce])
 
   useFrame((_, delta) => {
     const a = anim.current

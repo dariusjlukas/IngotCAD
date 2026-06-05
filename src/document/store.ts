@@ -14,6 +14,7 @@ import type {
   BooleanOp,
   CadDocument,
   CadNode,
+  MeshAsset,
   NodeId,
   PrimitiveParams,
   PrimitiveType,
@@ -105,6 +106,97 @@ function cleanupEmptyContainers(doc: CadDocument): void {
   }
 }
 
+const DUP_OFFSET = 4 // mm; nudge a duplicate/paste so it doesn't hide the original
+
+/** Where a dragged node lands relative to a drop target. */
+export type DropPosition = 'before' | 'after' | 'inside'
+
+interface ClipboardData {
+  nodes: Record<NodeId, CadNode>
+  rootIds: NodeId[]
+  assets: Record<string, MeshAsset>
+}
+
+/** The container node id whose childIds includes `id`, or null if `id` is a root. */
+function parentNodeId(doc: CadDocument, id: NodeId): NodeId | null {
+  for (const n of Object.values(doc.nodes)) {
+    if (hasChildren(n) && n.childIds.includes(id)) return n.id
+  }
+  return null
+}
+
+/** The array `id` lives in (doc.rootIds or its container's childIds), or null. */
+function parentArray(doc: CadDocument, id: NodeId): NodeId[] | null {
+  if (doc.rootIds.includes(id)) return doc.rootIds
+  for (const n of Object.values(doc.nodes)) {
+    if (hasChildren(n) && n.childIds.includes(id)) return n.childIds
+  }
+  return null
+}
+
+/** Keep only ids that aren't descendants of another id in the list. */
+function topLevelOf(doc: CadDocument, ids: NodeId[]): NodeId[] {
+  const set = new Set(ids)
+  return ids.filter((id) => {
+    let p = parentNodeId(doc, id)
+    while (p) {
+      if (set.has(p)) return false
+      p = parentNodeId(doc, p)
+    }
+    return true
+  })
+}
+
+/** World transform of `id` = composition of its ancestor transforms (root→node). */
+function worldTransform(doc: CadDocument, id: NodeId): Transform {
+  const chain: Transform[] = []
+  let cur: NodeId | null = id
+  while (cur) {
+    const n = doc.nodes[cur]
+    if (!n) break
+    chain.unshift(n.transform)
+    cur = parentNodeId(doc, cur)
+  }
+  return chain.reduce((acc, t) => composeTransforms(acc, t), IDENTITY_TRANSFORM)
+}
+
+/** The local transform `id` needs under `destParentId` to keep its world pose. */
+function localTransformUnder(doc: CadDocument, id: NodeId, destParentId: NodeId | null): Transform {
+  const destWorld = transformToMatrix4(
+    destParentId ? worldTransform(doc, destParentId) : IDENTITY_TRANSFORM,
+  )
+  const world = transformToMatrix4(worldTransform(doc, id))
+  return matrix4ToTransform(destWorld.invert().multiply(world))
+}
+
+type CloneSource = Pick<CadDocument, 'nodes' | 'assets'>
+
+/**
+ * Deep-clone the subtree at `srcId` from `src` into `doc` with fresh ids. `src`
+ * must be a plain (non-immer-draft) object so structuredClone is safe; `doc` is
+ * the draft being written. Mesh assets are copied in if missing.
+ */
+function cloneSubtree(src: CloneSource, doc: CadDocument, srcId: NodeId): NodeId | null {
+  const srcNode = src.nodes[srcId]
+  if (!srcNode) return null
+  const newId = nanoid()
+  const clone = structuredClone(srcNode)
+  clone.id = newId
+  if (hasChildren(clone) && hasChildren(srcNode)) {
+    clone.childIds = srcNode.childIds
+      .map((cid) => cloneSubtree(src, doc, cid))
+      .filter((cid): cid is NodeId => cid !== null)
+  } else if (clone.kind === 'primitive' && clone.params.type === 'mesh') {
+    const assetId = clone.params.assetId
+    if (!doc.assets[assetId] && src.assets[assetId]) {
+      doc.assets[assetId] = structuredClone(src.assets[assetId])
+    }
+  }
+  doc.nodes[newId] = clone
+  doc.featureOrder.push(newId)
+  return newId
+}
+
 export interface CadState {
   doc: CadDocument
   selectedIds: NodeId[]
@@ -116,6 +208,8 @@ export interface CadState {
   documentName: string
   /** Whether there are unsaved changes since the last save / new / open. */
   dirty: boolean
+  /** In-app clipboard for copy/paste (not part of the document or undo). */
+  clipboard: ClipboardData | null
 
   // selection
   select: (ids: NodeId[]) => void
@@ -143,6 +237,14 @@ export interface CadState {
   ungroup: (id: NodeId) => void
   applyBoolean: (ids: NodeId[], op: BooleanOp) => NodeId | null
   deleteNodes: (ids: NodeId[]) => void
+  /** Deep-copy the selected subtree(s) as siblings, nudged + selected. */
+  duplicateNodes: (ids: NodeId[]) => NodeId[]
+  /** Reorder/reparent dragged nodes relative to a target (preserves world pose). */
+  moveNodes: (ids: NodeId[], targetId: NodeId, position: DropPosition) => void
+  /** Snapshot the selected subtree(s) into the in-app clipboard. */
+  copyNodes: (ids: NodeId[]) => void
+  /** Paste the clipboard as new root nodes, nudged + selected. */
+  pasteClipboard: () => NodeId[]
 
   // node edits
   transformNode: (id: NodeId, transform: Transform) => void
@@ -218,6 +320,7 @@ export const useCadStore = create<CadState>()((set, get) => {
     counter: 0,
     documentName: 'Untitled',
     dirty: false,
+    clipboard: null,
 
     select: (ids) => set({ selectedIds: ids }),
     toggleSelect: (id) =>
@@ -404,6 +507,129 @@ export const useCadStore = create<CadState>()((set, get) => {
         cleanupEmptyContainers(doc)
       })
       set((state) => ({ selectedIds: state.selectedIds.filter((id) => state.doc.nodes[id]) }))
+    },
+
+    duplicateNodes: (ids) => {
+      // Source must be the live (non-draft) doc so structuredClone is safe.
+      const srcDoc = get().doc
+      const tops = topLevelOf(srcDoc, [...new Set(ids)])
+      if (tops.length === 0) return []
+      const created: NodeId[] = []
+      mutate((doc) => {
+        for (const id of tops) {
+          const newId = cloneSubtree(srcDoc, doc, id)
+          if (!newId) continue
+          const arr = parentArray(doc, id)
+          if (arr) arr.splice(arr.indexOf(id) + 1, 0, newId)
+          else doc.rootIds.push(newId)
+          const node = doc.nodes[newId]
+          const p = node.transform.position
+          node.transform = {
+            ...node.transform,
+            position: [p[0] + DUP_OFFSET, p[1] + DUP_OFFSET, p[2]],
+          }
+          created.push(newId)
+        }
+      })
+      if (created.length) get().select(created)
+      return created
+    },
+
+    moveNodes: (ids, targetId, position) => {
+      mutate((doc) => {
+        if (!doc.nodes[targetId]) return
+        const moving = topLevelOf(doc, [...new Set(ids)]).filter((id) => id !== targetId)
+        if (moving.length === 0) return
+        // Never drop a node into its own subtree.
+        for (const id of moving) {
+          const sub = new Set<NodeId>()
+          collectSubtree(doc, id, sub)
+          if (sub.has(targetId)) return
+        }
+        const target = doc.nodes[targetId]
+        let destArray: NodeId[]
+        let destParentId: NodeId | null
+        if (position === 'inside') {
+          if (!hasChildren(target)) return
+          destArray = target.childIds
+          destParentId = targetId
+        } else {
+          destArray = parentArray(doc, targetId) ?? doc.rootIds
+          destParentId = parentNodeId(doc, targetId)
+        }
+        // Compute new local transforms (preserving world pose) before any moves.
+        const newLocals = new Map<NodeId, Transform>()
+        for (const id of moving) newLocals.set(id, localTransformUnder(doc, id, destParentId))
+        // Detach from current parents.
+        for (const id of moving) {
+          const arr = parentArray(doc, id)
+          if (arr) {
+            const i = arr.indexOf(id)
+            if (i >= 0) arr.splice(i, 1)
+          }
+        }
+        // Insert (target index may have shifted after detaching).
+        let insertAt: number
+        if (position === 'inside') insertAt = destArray.length
+        else {
+          const ti = destArray.indexOf(targetId)
+          insertAt = ti < 0 ? destArray.length : position === 'before' ? ti : ti + 1
+        }
+        destArray.splice(insertAt, 0, ...moving)
+        for (const id of moving) {
+          const n = doc.nodes[id]
+          n.transform = newLocals.get(id)!
+          if (destParentId === null) n.role = 'solid' // role only applies inside a group
+        }
+        cleanupEmptyContainers(doc)
+      })
+      set((state) => ({ selectedIds: state.selectedIds.filter((id) => state.doc.nodes[id]) }))
+    },
+
+    copyNodes: (ids) => {
+      const doc = get().doc
+      const tops = topLevelOf(doc, [...new Set(ids)])
+      if (tops.length === 0) {
+        set({ clipboard: null })
+        return
+      }
+      const sub = new Set<NodeId>()
+      tops.forEach((id) => collectSubtree(doc, id, sub))
+      const nodes: Record<NodeId, CadNode> = {}
+      const assets: Record<string, MeshAsset> = {}
+      sub.forEach((id) => {
+        const n = doc.nodes[id]
+        if (!n) return
+        nodes[id] = structuredClone(n)
+        if (n.kind === 'primitive' && n.params.type === 'mesh') {
+          const a = doc.assets[n.params.assetId]
+          if (a) assets[n.params.assetId] = structuredClone(a)
+        }
+      })
+      set({ clipboard: { nodes, rootIds: tops, assets } })
+    },
+
+    pasteClipboard: () => {
+      const clip = get().clipboard
+      if (!clip || clip.rootIds.length === 0) return []
+      const created: NodeId[] = []
+      mutate((doc) => {
+        for (const id of clip.rootIds) {
+          const newId = cloneSubtree(clip, doc, id)
+          if (!newId) continue
+          doc.rootIds.push(newId)
+          const node = doc.nodes[newId]
+          const p = node.transform.position
+          node.transform = {
+            ...node.transform,
+            position: [p[0] + DUP_OFFSET, p[1] + DUP_OFFSET, p[2]],
+          }
+          node.role = 'solid' // pasted at root: role only applies inside a group
+          created.push(newId)
+        }
+      })
+      if (created.length) get().select(created)
+      return created
     },
 
     transformNode: (id, transform) =>

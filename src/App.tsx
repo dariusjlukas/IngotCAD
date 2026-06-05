@@ -7,6 +7,8 @@ import { ResizeHandle } from './ui/ResizeHandle'
 import { StatusBar } from './ui/StatusBar'
 import { SettingsDialog } from './ui/SettingsDialog'
 import { ShortcutsDialog } from './ui/ShortcutsDialog'
+import { Toaster } from './ui/Toaster'
+import { ContextMenuHost } from './ui/ContextMenuHost'
 import { useDialogStore } from './ui/dialogStore'
 import { Viewport } from './viewport/Viewport'
 import { SketchCanvas } from './sketch/SketchCanvas'
@@ -74,6 +76,23 @@ function useKeyboardShortcuts(): void {
       if (meta && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         newProject()
+        return
+      }
+      if (meta && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        if (store.selectedIds.length) store.duplicateNodes(store.selectedIds)
+        return
+      }
+      if (meta && e.key.toLowerCase() === 'c') {
+        if (store.selectedIds.length) {
+          e.preventDefault()
+          store.copyNodes(store.selectedIds)
+        }
+        return
+      }
+      if (meta && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        store.pasteClipboard()
         return
       }
       if (e.key === '?') {
@@ -153,6 +172,8 @@ export default function App() {
 
       <SettingsDialog />
       <ShortcutsDialog />
+      <Toaster />
+      <ContextMenuHost />
     </div>
   )
 }
