@@ -13,7 +13,7 @@ import { cardinalPlane, planeFromFace, planeToTransform } from './plane'
 const CARDINAL_LABEL: Record<PlaneKind, string> = { xy: 'Top', xz: 'Front', yz: 'Right' }
 
 /** Drawing tools. `null` means Select mode (the absence of a tool). */
-export type SketchTool = 'line' | 'rectangle' | 'circle' | 'dimension'
+export type SketchTool = 'line' | 'rectangle' | 'circle' | 'dimension' | 'project'
 
 export interface View {
   cx: number
@@ -52,6 +52,8 @@ interface SketchState {
   data: SketchData
   selection: Ref[]
   view: View
+  /** When true, newly created geometry is construction (reference-only). */
+  construction: boolean
   /** What the profile becomes on commit (the value is chosen afterward in preview). */
   outputMode: 'extrude' | 'revolve'
 
@@ -61,16 +63,23 @@ interface SketchState {
   editSketch: (nodeId: NodeId) => void
   chooseCardinal: (kind: PlaneKind) => void
   chooseFace: (point: Vec3, normal: Vec3) => void
+  /** Start sketching on an already-resolved construction plane. */
+  chooseConstructionPlane: (plane: SketchPlane, label: string) => void
   cancel: () => void
   setTool: (tool: SketchTool | null) => void
   setView: (view: View) => void
   fitView: () => void
+  setConstruction: (construction: boolean) => void
+  /** Flip the construction flag of every shape touched by the selection. */
+  toggleConstructionSelected: () => void
   setOutputMode: (mode: 'extrude' | 'revolve') => void
 
   addRectangle: (x: number, y: number, w: number, h: number) => void
   addCircle: (cx: number, cy: number, r: number) => void
   /** Create a closed loop; entries with `coincident` get tied to an existing point. */
   addLoop: (entries: { pos: Vec2; coincident?: PointId }[]) => void
+  /** Include a sectioned geometry's outline (one or more loops) as anchored geometry. */
+  addProjectedLoops: (polys: Vec2[][]) => void
 
   addConstraint: (input: ConstraintInput) => ConstraintId
   addDistance: (a: PointId, b: PointId, value: number, offset: number) => ConstraintId
@@ -106,6 +115,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
     data: emptySketch(),
     selection: [],
     view: DEFAULT_VIEW,
+    construction: false,
     outputMode: 'extrude',
 
     open: () =>
@@ -119,6 +129,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
         selection: [],
         tool: 'line',
         view: DEFAULT_VIEW,
+        construction: false,
         outputMode: 'extrude',
       }),
     editSketch: (nodeId) => {
@@ -136,6 +147,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
         selection: [],
         tool: null,
         view: DEFAULT_VIEW,
+        construction: false,
         outputMode: p.type === 'extrusion' ? 'extrude' : 'revolve',
       })
       get().fitView()
@@ -154,6 +166,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
         choosing: false,
         active: true,
       }),
+    chooseConstructionPlane: (plane, label) =>
+      set({ plane, planeLabel: label, choosing: false, active: true }),
     cancel: () =>
       set({
         active: false,
@@ -165,6 +179,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
       }),
     setTool: (tool) => set({ tool, selection: tool === null ? get().selection : [] }),
     setView: (view) => set({ view }),
+    setConstruction: (construction) => set({ construction }),
     setOutputMode: (outputMode) => set({ outputMode }),
     fitView: () =>
       set((s) => {
@@ -194,7 +209,12 @@ export const useSketchStore = create<SketchState>((set, get) => {
         d.points[p1] = { x: x + w, y, fixed: false }
         d.points[p2] = { x: x + w, y: y + h, fixed: false }
         d.points[p3] = { x, y: y + h, fixed: false }
-        d.shapes.push({ id: id(), kind: 'loop', pts: [p0, p1, p2, p3] })
+        d.shapes.push({
+          id: id(),
+          kind: 'loop',
+          pts: [p0, p1, p2, p3],
+          ...(get().construction && { construction: true }),
+        })
         d.constraints.push(
           { id: id(), kind: 'horizontal', a: p0, b: p1 },
           { id: id(), kind: 'horizontal', a: p3, b: p2 },
@@ -207,7 +227,13 @@ export const useSketchStore = create<SketchState>((set, get) => {
       update((d) => {
         const c = id()
         d.points[c] = { x: cx, y: cy, fixed: false }
-        d.shapes.push({ id: id(), kind: 'circle', c, r })
+        d.shapes.push({
+          id: id(),
+          kind: 'circle',
+          c,
+          r,
+          ...(get().construction && { construction: true }),
+        })
       }),
 
     addLoop: (entries) =>
@@ -217,13 +243,45 @@ export const useSketchStore = create<SketchState>((set, get) => {
           d.points[pid] = { x: e.pos[0], y: e.pos[1], fixed: false }
           return pid
         })
-        d.shapes.push({ id: id(), kind: 'loop', pts: ids })
+        d.shapes.push({
+          id: id(),
+          kind: 'loop',
+          pts: ids,
+          ...(get().construction && { construction: true }),
+        })
         // Merge vertices snapped onto existing points via a coincident constraint.
         entries.forEach((e, i) => {
           if (e.coincident && d.points[e.coincident]) {
             d.constraints.push({ id: id(), kind: 'coincident', a: ids[i], b: e.coincident })
           }
         })
+      }),
+
+    addProjectedLoops: (polys) =>
+      update((d) => {
+        const isConstruction = get().construction
+        for (const poly of polys) {
+          // Drop a duplicate closing vertex if the outline repeats its first point.
+          const last = poly.length - 1
+          const verts =
+            poly.length > 1 && poly[0][0] === poly[last][0] && poly[0][1] === poly[last][1]
+              ? poly.slice(0, -1)
+              : poly
+          if (verts.length < 3) continue
+          // Projected geometry is anchored (fixed) so it stays a faithful copy of
+          // the source object; coordinates keep their full precision (not rounded).
+          const ids = verts.map((v) => {
+            const pid = id()
+            d.points[pid] = { x: v[0], y: v[1], fixed: true }
+            return pid
+          })
+          d.shapes.push({
+            id: id(),
+            kind: 'loop',
+            pts: ids,
+            ...(isConstruction && { construction: true }),
+          })
+        }
       }),
 
     addConstraint: (input) => {
@@ -267,6 +325,29 @@ export const useSketchStore = create<SketchState>((set, get) => {
       update((d) => {
         for (const pid of ids) if (d.points[pid]) d.points[pid].fixed = !d.points[pid].fixed
       }),
+
+    toggleConstructionSelected: () => {
+      const refs = get().selection
+      if (refs.length === 0) return
+      update((d) => {
+        const shapeIds = new Set<ShapeId>()
+        for (const r of refs) {
+          if (r.t === 'circle') shapeIds.add(r.id)
+          else if (r.t === 'segment') {
+            const sid = shapeIdOfPoint(d, r.a)
+            if (sid) shapeIds.add(sid)
+          } else if (r.t === 'point') {
+            const sid = shapeIdOfPoint(d, r.id)
+            if (sid) shapeIds.add(sid)
+          }
+        }
+        for (const s of d.shapes) {
+          if (!shapeIds.has(s.id)) continue
+          if (s.construction) delete s.construction
+          else s.construction = true
+        }
+      })
+    },
 
     dragPoint: (pid, x, y) =>
       update(

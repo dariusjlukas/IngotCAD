@@ -15,6 +15,7 @@ const DRAW_TOOLS: { id: SketchTool; label: string }[] = [
   { id: 'rectangle', label: 'Rectangle' },
   { id: 'circle', label: 'Circle' },
   { id: 'dimension', label: 'Dimension' },
+  { id: 'project', label: 'Project' },
 ]
 
 const TOOL_HINT: Record<string, string> = {
@@ -23,6 +24,8 @@ const TOOL_HINT: Record<string, string> = {
   rectangle: 'Drag to draw a rectangle (it stays rectangular).',
   circle: 'Drag from the center to set the radius.',
   dimension: 'Click two points (or a segment); move to place, click, then type a value.',
+  project:
+    'Click a section outline (the gray in-plane cross-section of the scene) to include it as anchored sketch geometry.',
 }
 
 function Btn({
@@ -60,13 +63,16 @@ function Btn({
 export function SketchToolbar() {
   const tool = useSketchStore((s) => s.tool)
   const setTool = useSketchStore((s) => s.setTool)
+  const construction = useSketchStore((s) => s.construction)
+  const setConstruction = useSketchStore((s) => s.setConstruction)
   const outputMode = useSketchStore((s) => s.outputMode)
   const setOutputMode = useSketchStore((s) => s.setOutputMode)
   const fitView = useSketchStore((s) => s.fitView)
   const cancel = useSketchStore((s) => s.cancel)
   const commit = useSketchStore((s) => s.commit)
   const planeLabel = useSketchStore((s) => s.planeLabel)
-  const hasShapes = useSketchStore((s) => s.data.shapes.length > 0)
+  // Only real (non-construction) shapes form a profile, so gate Make on those.
+  const hasRealShapes = useSketchStore((s) => s.data.shapes.some((sh) => !sh.construction))
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-1.5">
@@ -87,6 +93,15 @@ export function SketchToolbar() {
           {t.label}
         </Btn>
       ))}
+
+      <div className="mx-1 h-5 w-px shrink-0 bg-line-strong" />
+      <Btn
+        onClick={() => setConstruction(!construction)}
+        active={construction}
+        title="Construction mode: new geometry is reference-only (snap/constrain to it, but it won't extrude)"
+      >
+        Construction
+      </Btn>
 
       <div className="mx-1 h-5 w-px shrink-0 bg-line-strong" />
       <Btn onClick={fitView} title="Fit view to sketch">
@@ -123,7 +138,7 @@ export function SketchToolbar() {
       <button
         type="button"
         onClick={commit}
-        disabled={!hasShapes}
+        disabled={!hasRealShapes}
         className="shrink-0 rounded bg-accent px-3 py-1 text-sm text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-35"
         title="Preview and place the solid"
       >
@@ -163,6 +178,7 @@ export function SketchToolsPanel() {
   const addConstraint = useSketchStore((s) => s.addConstraint)
   const setCircleRadius = useSketchStore((s) => s.setCircleRadius)
   const togglePointFixed = useSketchStore((s) => s.togglePointFixed)
+  const toggleConstructionSelected = useSketchStore((s) => s.toggleConstructionSelected)
   const clearSelection = useSketchStore((s) => s.clearSelection)
 
   const selPoints = selection
@@ -252,6 +268,12 @@ export function SketchToolsPanel() {
           </CBtn>
           <CBtn onClick={() => togglePointFixed(selPoints)} disabled={selPoints.length === 0}>
             Fix / Unfix point
+          </CBtn>
+          <CBtn
+            onClick={toggleConstructionSelected}
+            disabled={selPoints.length === 0 && selSegs.length === 0 && selCircles.length === 0}
+          >
+            Toggle construction
           </CBtn>
         </div>
         <p className="mt-3 text-xs text-fg-faint">

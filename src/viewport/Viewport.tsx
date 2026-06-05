@@ -9,6 +9,7 @@ import { GizmoHelper, GizmoViewport, Grid, OrbitControls } from '@react-three/dr
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faHouse } from '@fortawesome/free-solid-svg-icons'
 import { CadScene } from './CadScene'
+import { ConstructionPlanes } from './ConstructionPlanes'
 import { CameraController } from './CameraController'
 import { CameraRig } from './CameraRig'
 import { frameAll } from './meshRegistry'
@@ -149,6 +150,7 @@ export function Viewport() {
         )}
 
         <CadScene />
+        <ConstructionPlanes />
         <OperationPreview />
 
         <CameraRig />

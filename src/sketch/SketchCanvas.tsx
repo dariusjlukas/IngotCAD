@@ -15,7 +15,7 @@ import { useSketchStore } from './sketchStore'
 import type { Ref } from './sketchStore'
 import type { PointId } from './model'
 import { loopSegments } from './model'
-import { distance, niceStep } from './geometry'
+import { distance, niceStep, pointInPolygon } from './geometry'
 import { worldToLocalMatrix } from './plane'
 import { useCadStore } from '../document/store'
 import { engine } from '../engine/engine'
@@ -54,7 +54,8 @@ export function SketchCanvas() {
   const plane = useSketchStore((s) => s.plane)
   const editingNodeId = useSketchStore((s) => s.editingNodeId)
   const st = useSketchStore
-  const [projection, setProjection] = useState<Vec2[][]>([])
+  // One polygon-group per scene geometry that meets the plane (section outlines).
+  const [projection, setProjection] = useState<Vec2[][][]>([])
 
   const svgRef = useRef<SVGSVGElement>(null)
   const [cursor, setCursor] = useState<Vec2 | null>(null)
@@ -62,6 +63,8 @@ export function SketchCanvas() {
   // Line-tool draft vertices; `coincident` ties one onto an existing point (merge).
   const [lineDraft, setLineDraft] = useState<{ pos: Vec2; coincident?: PointId }[]>([])
   const [snapPoint, setSnapPoint] = useState<PointId | null>(null)
+  // Projection outline the Project tool would include if clicked (index into `projection`).
+  const [projHover, setProjHover] = useState<number | null>(null)
   const [dimA, setDimA] = useState<PointId | null>(null)
   const [placing, setPlacing] = useState<{ a: PointId; b: PointId } | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
@@ -155,6 +158,21 @@ export function SketchCanvas() {
     return null
   }
 
+  // Index of the section geometry under the cursor: inside one of its outline
+  // polygons, or near an edge (so thin outlines stay grabbable). Topmost wins.
+  const hitProjection = (p: Vec2): number | null => {
+    for (let gi = projection.length - 1; gi >= 0; gi--) {
+      for (const poly of projection[gi]) {
+        if (poly.length < 3) continue
+        if (pointInPolygon(poly, p)) return gi
+        for (let j = 0; j < poly.length; j++) {
+          if (distToSeg(p, poly[j], poly[(j + 1) % poly.length]) < segHitD) return gi
+        }
+      }
+    }
+    return null
+  }
+
   const addToSelection = (ref: Ref, additive: boolean) => {
     if (!additive) return st.getState().select([ref])
     const cur = st.getState().selection
@@ -187,8 +205,9 @@ export function SketchCanvas() {
     setEditing(null)
   }
 
-  // Project the existing scene onto this plane for a reference underlay. The cad
-  // document is static while sketching, so this runs once per chosen plane.
+  // Section the existing scene with this plane for a reference underlay (only
+  // geometry lying in the plane, not the silhouette of things in front/behind).
+  // The cad document is static while sketching, so this runs once per plane.
   useEffect(() => {
     if (!plane) return
     const cadDoc = useCadStore.getState().doc
@@ -346,6 +365,12 @@ export function SketchCanvas() {
       return
     }
 
+    if (tool === 'project') {
+      const hi = hitProjection(raw)
+      if (hi != null) st.getState().addProjectedLoops(projection[hi])
+      return
+    }
+
     // rectangle / circle: begin a drag
     setDrag({ start: snap, current: snap })
     svgRef.current?.setPointerCapture(e.pointerId)
@@ -367,6 +392,7 @@ export function SketchCanvas() {
     setSnapPoint(
       tool === 'line' || tool === 'dimension' ? hitPoint(toModelRaw(e.clientX, e.clientY)) : null,
     )
+    setProjHover(tool === 'project' ? hitProjection(toModelRaw(e.clientX, e.clientY)) : null)
     if (moveRef.current) {
       st.getState().dragPoint(moveRef.current, snap[0], snap[1])
       return
@@ -631,19 +657,32 @@ export function SketchCanvas() {
           </>
         )}
 
-        {/* Reference: the existing scene projected onto this plane */}
-        {projection.map((poly, i) => (
-          <path
-            key={`proj${i}`}
-            d={path(poly)}
-            fill="rgba(150,165,190,0.06)"
-            stroke="rgba(150,165,190,0.4)"
-            strokeWidth={1}
-            strokeDasharray="2 2"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
+        {/* Reference: the existing scene sectioned by this plane (in-plane
+            geometry only), one outline group per object. With the Project tool
+            active a group is clickable to include it; the hovered one lights up. */}
+        {projection.map((group, gi) => {
+          const active = tool === 'project'
+          const hot = active && gi === projHover
+          return (
+            <g key={`proj${gi}`}>
+              {group.map((poly, i) => (
+                <path
+                  key={i}
+                  d={path(poly)}
+                  fill={hot ? 'rgba(123,216,143,0.12)' : 'rgba(150,165,190,0.06)'}
+                  stroke={
+                    hot ? '#7bd88f' : active ? 'rgba(150,165,190,0.75)' : 'rgba(150,165,190,0.4)'
+                  }
+                  strokeWidth={hot ? 2 : 1}
+                  strokeDasharray="2 2"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </g>
+          )
+        })}
 
+        {/* Construction geometry is reference-only: dashed, unfilled, violet. */}
         {data.shapes.map((s) =>
           s.kind === 'circle' ? (
             <circle
@@ -651,18 +690,20 @@ export function SketchCanvas() {
               cx={pos(s.c)[0]}
               cy={-pos(s.c)[1]}
               r={s.r}
-              fill="rgba(110,168,254,0.18)"
-              stroke={isSelCircle(s.id) ? '#ffd866' : '#6ea8fe'}
+              fill={s.construction ? 'none' : 'rgba(110,168,254,0.18)'}
+              stroke={isSelCircle(s.id) ? '#ffd866' : s.construction ? '#ab9df2' : '#6ea8fe'}
               strokeWidth={1.6}
+              strokeDasharray={s.construction ? '5 3' : undefined}
               vectorEffect="non-scaling-stroke"
             />
           ) : (
             <path
               key={s.id}
               d={path(s.pts.map(pos))}
-              fill="rgba(110,168,254,0.16)"
-              stroke="#6ea8fe"
+              fill={s.construction ? 'none' : 'rgba(110,168,254,0.16)'}
+              stroke={s.construction ? '#ab9df2' : '#6ea8fe'}
               strokeWidth={1.6}
+              strokeDasharray={s.construction ? '5 3' : undefined}
               vectorEffect="non-scaling-stroke"
             />
           ),

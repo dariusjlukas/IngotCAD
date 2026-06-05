@@ -1,12 +1,20 @@
 /** The modeling tool bar: create, transform-mode, combine, and quick edits. */
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCube, faDatabase, faCircle, faPencil } from '@fortawesome/free-solid-svg-icons'
+import {
+  faCube,
+  faDatabase,
+  faCircle,
+  faPencil,
+  faBorderAll,
+} from '@fortawesome/free-solid-svg-icons'
 import { useCadStore } from '../document/store'
 import { selectCanRedo, selectCanUndo, selectSingleSelected } from '../document/selectors'
 import { useViewportStore } from '../viewport/viewportStore'
 import type { GizmoMode } from '../viewport/viewportStore'
+import { usePlaneBuilderStore } from '../viewport/planeBuilderStore'
 import { useSketchStore } from '../sketch/sketchStore'
+import { openContextMenu } from './contextMenuStore'
 
 function Btn({
   onClick,
@@ -15,7 +23,7 @@ function Btn({
   title,
   children,
 }: {
-  onClick: () => void
+  onClick: (e: MouseEvent) => void
   disabled?: boolean
   active?: boolean
   title?: string
@@ -54,6 +62,7 @@ export function Toolbar() {
   const selected = useCadStore(selectSingleSelected)
 
   const addPrimitive = useCadStore((s) => s.addPrimitive)
+  const addPlane = useCadStore((s) => s.addPlane)
   const applyBoolean = useCadStore((s) => s.applyBoolean)
   const group = useCadStore((s) => s.group)
   const ungroup = useCadStore((s) => s.ungroup)
@@ -64,6 +73,20 @@ export function Toolbar() {
   const gizmoMode = useViewportStore((s) => s.gizmoMode)
   const setGizmoMode = useViewportStore((s) => s.setGizmoMode)
   const openSketch = useSketchStore((s) => s.open)
+  const startPlaneTool = usePlaneBuilderStore((s) => s.start)
+
+  const openPlaneMenu = (e: MouseEvent) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    openContextMenu(r.left, r.bottom + 4, [
+      {
+        label: 'Offset plane (from XY)',
+        onSelect: () => addPlane({ kind: 'offset', base: 'xy', distance: 0 }),
+      },
+      { label: 'Parallel to a face…', onSelect: () => startPlaneTool('face') },
+      { label: 'Through 3 points…', onSelect: () => startPlaneTool('threePoints') },
+      { label: 'At an angle about an edge…', onSelect: () => startPlaneTool('edgeAngle') },
+    ])
+  }
 
   const multi = selectedIds.length >= 2
   const hasSelection = selectedIds.length > 0
@@ -89,6 +112,9 @@ export function Toolbar() {
         </Btn>
         <Btn onClick={() => openSketch()} title="Sketch a 2D profile and extrude it">
           <FontAwesomeIcon icon={faPencil} fixedWidth /> Sketch
+        </Btn>
+        <Btn onClick={openPlaneMenu} title="Add a construction plane">
+          <FontAwesomeIcon icon={faBorderAll} fixedWidth /> Plane ▾
         </Btn>
       </Group>
 

@@ -76,10 +76,11 @@ export function constraintLabel(c: Constraint): string {
   return `${KIND_SHORT[c.kind]} ${c.kind}`
 }
 
-/** Solved closed contours (mm, Y-up) for extrusion. */
+/** Solved closed contours (mm, Y-up) for extrusion. Construction shapes are reference-only. */
 export function shapeContours(data: SketchData): Vec2[][] {
   const out: Vec2[][] = []
   for (const s of data.shapes) {
+    if (s.construction) continue
     if (s.kind === 'loop') {
       const pts = s.pts
         .map((id) => data.points[id])

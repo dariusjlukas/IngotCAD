@@ -46,9 +46,11 @@ export interface SPoint {
   fixed: boolean
 }
 
+// `construction` geometry is reference-only: it participates in constraints and
+// snapping but is excluded from the extrude/revolve profile (see shapeContours).
 export type SketchShape =
-  | { id: ShapeId; kind: 'loop'; pts: PointId[] }
-  | { id: ShapeId; kind: 'circle'; c: PointId; r: number }
+  | { id: ShapeId; kind: 'loop'; pts: PointId[]; construction?: boolean }
+  | { id: ShapeId; kind: 'circle'; c: PointId; r: number; construction?: boolean }
 
 export type ConstraintKind =
   | 'coincident'
@@ -91,6 +93,36 @@ export interface SketchPlane {
 export interface SketchSource {
   data: SketchData
   plane: SketchPlane
+}
+
+// ---------------------------------------------------------------------------
+// Construction planes (datums): named reference planes the user can sketch on.
+// These are NOT geometry — they live alongside the CSG node tree, never enter
+// evaluation, and are resolved to a SketchPlane on demand (see src/sketch/plane).
+// ---------------------------------------------------------------------------
+
+/**
+ * How a construction plane is built. Picked geometry (faces, points, edges) is
+ * snapshotted into the definition, so a plane is resolvable purely from this
+ * data with no live dependency on the objects it was derived from (associativity
+ * is intentionally deferred — consistent with how sketches store a static plane).
+ */
+export type PlaneDefinition =
+  /** Parallel to a cardinal plane, shifted `distance` mm along its normal. */
+  | { kind: 'offset'; base: PlaneKind; distance: number }
+  /** Parallel to a picked face (origin + outward normal), offset `distance` mm. */
+  | { kind: 'face'; origin: Vec3; normal: Vec3; distance: number }
+  /** Through three picked points (a = origin, a→b = U, normal = (b−a)×(c−a)). */
+  | { kind: 'threePoints'; a: Vec3; b: Vec3; c: Vec3 }
+  /** Hinged about an edge: `refNormal` rotated `angleDeg` about the edge `axis`. */
+  | { kind: 'edgeAngle'; origin: Vec3; axis: Vec3; refNormal: Vec3; angleDeg: number }
+
+/** A reference plane the user can sketch on. Reference data, not a solid. */
+export interface ConstructionPlane {
+  id: string
+  name: string
+  visible: boolean
+  definition: PlaneDefinition
 }
 
 /** Primitive shape parameters. The discriminant `type` selects the shape. */
@@ -183,6 +215,10 @@ export interface CadDocument {
   assets: Record<string, MeshAsset>
   /** Node ids in creation order, for the timeline. Filter to existing nodes. */
   featureOrder: NodeId[]
+  /** User-created construction planes (datums), keyed by id. */
+  planes: Record<string, ConstructionPlane>
+  /** Construction-plane id order, for listing in the outliner. */
+  planeOrder: string[]
 }
 
 export const SCHEMA_VERSION = 1
@@ -195,6 +231,8 @@ export function createEmptyDocument(): CadDocument {
     rootIds: [],
     assets: {},
     featureOrder: [],
+    planes: {},
+    planeOrder: [],
   }
 }
 

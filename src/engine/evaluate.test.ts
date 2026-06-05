@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import Module from 'manifold-3d'
 import type { ManifoldToplevel } from 'manifold-3d'
-import { computeExportRaw, measureSolid } from './evaluate'
+import { computeExportRaw, measureSolid, projectSceneRaw } from './evaluate'
+import { cardinalPlane, planeFromFace, worldToLocalMatrix } from '../sketch/plane'
 import { createEmptyDocument, IDENTITY_TRANSFORM } from '../document/types'
 import type { CadDocument, CadNode, PrimitiveParams, Vec2 } from '../document/types'
 
@@ -174,5 +175,80 @@ describe('Manifold evaluation pipeline', () => {
     }
     expect(minX).toBeCloseTo(-30, 1)
     expect(maxX).toBeCloseTo(30, 1)
+  })
+})
+
+function bounds(polys: Vec2[][]) {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of polys)
+    for (const [x, y] of p) {
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x)
+      maxY = Math.max(maxY, y)
+    }
+  return { minX, minY, maxX, maxY }
+}
+
+describe('sketch-plane sectioning (projectSceneRaw)', () => {
+  it('sections a box at its mid-plane into its cross-section (not a silhouette)', () => {
+    const doc = docOf([prim('b', { type: 'box', size: [20, 20, 20] })], ['b'])
+    // Box spans z ∈ [-10, 10]; the XY plane cuts through its middle.
+    const groups = projectSceneRaw(M, doc, ['b'], worldToLocalMatrix(cardinalPlane('xy')))
+    expect(groups).toHaveLength(1)
+    const b = bounds(groups.flat())
+    expect(b.minX).toBeCloseTo(-10, 1)
+    expect(b.maxX).toBeCloseTo(10, 1)
+    expect(b.minY).toBeCloseTo(-10, 1)
+    expect(b.maxY).toBeCloseTo(10, 1)
+  })
+
+  it('captures a face that lies in the plane (sketch-on-a-face)', () => {
+    const doc = docOf([prim('b', { type: 'box', size: [20, 20, 20] })], ['b'])
+    // Plane coincident with the top face (z=10): the face itself is in-plane.
+    const groups = projectSceneRaw(
+      M,
+      doc,
+      ['b'],
+      worldToLocalMatrix(planeFromFace([0, 0, 10], [0, 0, 1])),
+    )
+    expect(groups.length).toBeGreaterThan(0)
+    const b = bounds(groups.flat())
+    expect(b.maxX - b.minX).toBeCloseTo(20, 1)
+    expect(b.maxY - b.minY).toBeCloseTo(20, 1)
+  })
+
+  it('keeps overlapping objects as separate per-geometry outlines (not merged)', () => {
+    // Two 20mm boxes overlapping in x∈[0,10]; both cross the XY plane.
+    const doc = docOf(
+      [
+        prim('b1', { type: 'box', size: [20, 20, 20] }, [0, 0, 0]),
+        prim('b2', { type: 'box', size: [20, 20, 20] }, [10, 0, 0]),
+      ],
+      ['b1', 'b2'],
+    )
+    const groups = projectSceneRaw(M, doc, ['b1', 'b2'], worldToLocalMatrix(cardinalPlane('xy')))
+    // A union would merge these into one outline; per-geometry keeps two squares.
+    expect(groups).toHaveLength(2)
+    for (const g of groups) {
+      const b = bounds(g)
+      expect(b.maxX - b.minX).toBeCloseTo(20, 1)
+      expect(b.maxY - b.minY).toBeCloseTo(20, 1)
+    }
+  })
+
+  it('returns nothing for a plane the geometry only sits in front of / behind', () => {
+    const doc = docOf([prim('b', { type: 'box', size: [20, 20, 20] })], ['b'])
+    // Plane 10mm above the top face — the box lies entirely behind it.
+    const groups = projectSceneRaw(
+      M,
+      doc,
+      ['b'],
+      worldToLocalMatrix(planeFromFace([0, 0, 20], [0, 0, 1])),
+    )
+    expect(groups).toEqual([])
   })
 })

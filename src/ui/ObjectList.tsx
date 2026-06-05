@@ -16,6 +16,7 @@ import {
   faEyeSlash,
   faChevronRight,
   faChevronDown,
+  faBorderAll,
 } from '@fortawesome/free-solid-svg-icons'
 import { useCadStore } from '../document/store'
 import type { DropPosition } from '../document/store'
@@ -204,6 +205,90 @@ function Row({
   )
 }
 
+/** A flat list of the document's construction planes (datums), below the tree. */
+function PlaneSection() {
+  const planeOrder = useCadStore((s) => s.doc.planeOrder)
+  const planes = useCadStore((s) => s.doc.planes)
+  const selectedPlaneId = useCadStore((s) => s.selectedPlaneId)
+  const selectPlane = useCadStore((s) => s.selectPlane)
+  const setPlaneVisible = useCadStore((s) => s.setPlaneVisible)
+  const renamePlane = useCadStore((s) => s.renamePlane)
+  const deletePlane = useCadStore((s) => s.deletePlane)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+
+  if (planeOrder.length === 0) return null
+
+  return (
+    <div className="mt-1 border-t border-line pt-1">
+      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-fg-faint">
+        Construction planes
+      </div>
+      {planeOrder.map((id) => {
+        const p = planes[id]
+        if (!p) return null
+        const selected = selectedPlaneId === id
+        return (
+          <div
+            key={id}
+            onClick={() => selectPlane(id)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              selectPlane(id)
+              openContextMenu(e.clientX, e.clientY, [
+                { label: 'Rename', onSelect: () => setRenamingId(id) },
+                { label: 'Delete', onSelect: () => deletePlane(id) },
+              ])
+            }}
+            className={
+              'flex cursor-pointer items-center gap-1.5 rounded py-1 pr-1.5 pl-2 text-sm ' +
+              (selected ? 'bg-selection text-fg-strong' : 'text-fg-muted hover:bg-elevated')
+            }
+          >
+            <span className="flex w-4 shrink-0 justify-center" style={{ color: '#ab9df2' }}>
+              <FontAwesomeIcon icon={faBorderAll} fixedWidth />
+            </span>
+            {renamingId === id ? (
+              <div className="flex-1">
+                <RenameInput
+                  initial={p.name}
+                  onCommit={(v) => {
+                    const t = v.trim()
+                    if (t && t !== p.name) renamePlane(id, t)
+                    setRenamingId(null)
+                  }}
+                  onCancel={() => setRenamingId(null)}
+                />
+              </div>
+            ) : (
+              <span
+                className="flex-1 truncate"
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  setRenamingId(id)
+                }}
+              >
+                {p.name}
+              </span>
+            )}
+            <button
+              type="button"
+              tabIndex={-1}
+              title={p.visible ? 'Hide' : 'Show'}
+              onClick={(e) => {
+                e.stopPropagation()
+                setPlaneVisible(id, !p.visible)
+              }}
+              className="shrink-0 px-0.5 text-fg-faint hover:text-fg"
+            >
+              <FontAwesomeIcon icon={p.visible ? faEye : faEyeSlash} fixedWidth />
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function ObjectList({ width }: { width: number }) {
   const doc = useCadStore((s) => s.doc)
   const selectedIds = useCadStore((s) => s.selectedIds)
@@ -312,7 +397,7 @@ export function ObjectList({ width }: { width: number }) {
         Objects
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1">
-        {rows.length === 0 ? (
+        {rows.length === 0 && doc.planeOrder.length === 0 ? (
           <p className="px-2 py-3 text-sm text-fg-faint">
             Nothing yet. Add a box, cylinder, or sphere from the toolbar.
           </p>
@@ -350,6 +435,7 @@ export function ObjectList({ width }: { width: number }) {
             )
           })
         )}
+        <PlaneSection />
       </div>
     </aside>
   )

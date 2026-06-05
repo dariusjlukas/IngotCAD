@@ -212,36 +212,68 @@ export function computeExportRaw(M: Wasm, doc: CadDocument, rootIds: NodeId[]): 
   }
 }
 
+const SECTION_EPSILON_MM = 0.01
+
 /**
- * Project the visible scene onto a sketch plane: evaluate the roots in world
- * space, transform into plane-local space (invMatrix = world→local), then
- * Manifold.project() flattens them onto local XY. Returns the outline polygons
- * (plane-local mm) for a reference underlay in the sketch view.
+ * In-plane section of one world-space solid: transform into plane-local space
+ * (invMatrix = world→local), then take the cross section at local z=0 — only the
+ * geometry lying in the plane, NOT the silhouette of what's in front/behind.
+ *
+ * We section a hair to each side of the plane and union the two. This captures
+ * geometry crossing the plane *and* faces that lie in it (e.g. when sketching on
+ * a face): Manifold's slice() returns empty at the very top of a solid's
+ * bounding box, so a face coincident with the plane would otherwise vanish
+ * depending on which side its solid sits on; the offsets dodge that boundary.
+ *
+ * Returns the section outline polygons in plane-local mm.
+ */
+function sectionSolid(worldSolid: Manifold, invMatrix: number[]): Vec2[][] {
+  let local: Manifold | null = null
+  let below: CrossSection | null = null
+  let above: CrossSection | null = null
+  let section: CrossSection | null = null
+  try {
+    local = worldSolid.transform(invMatrix as unknown as Mat4)
+    below = local.slice(-SECTION_EPSILON_MM)
+    above = local.slice(SECTION_EPSILON_MM)
+    section = below.add(above)
+    return section.toPolygons().map((poly) => poly.map((p) => [p[0], p[1]] as Vec2))
+  } finally {
+    section?.delete()
+    above?.delete()
+    below?.delete()
+    local?.delete()
+  }
+}
+
+/**
+ * Section the visible scene with a sketch plane, ONE geometry at a time: each
+ * root is evaluated and sectioned independently, so overlapping objects keep
+ * their own outlines instead of merging into a single silhouette. Returns one
+ * polygon-group per geometry that actually meets the plane (plane-local mm), for
+ * the reference underlay in the sketch view and the Project tool.
  */
 export function projectSceneRaw(
   M: Wasm,
   doc: CadDocument,
   rootIds: NodeId[],
   invMatrix: number[],
-): Vec2[][] {
-  const solids = rootIds.filter((id) => doc.nodes[id]).map((id) => evaluate(M, doc, id))
-  if (solids.length === 0) return []
-  let unioned: Manifold | null = null
-  let local: Manifold | null = null
-  let cross: CrossSection | null = null
-  try {
-    unioned = unionAll(M, solids)
-    local = unioned.transform(invMatrix as unknown as Mat4)
-    cross = local.project()
-    return cross.toPolygons().map((poly) => poly.map((p) => [p[0], p[1]] as Vec2))
-  } catch (err) {
-    console.error('projectSceneRaw failed', err)
-    return []
-  } finally {
-    cross?.delete()
-    local?.delete()
-    unioned?.delete()
+): Vec2[][][] {
+  const groups: Vec2[][][] = []
+  for (const id of rootIds) {
+    if (!doc.nodes[id]) continue
+    let solid: Manifold | null = null
+    try {
+      solid = evaluate(M, doc, id)
+      const polys = sectionSolid(solid, invMatrix)
+      if (polys.length) groups.push(polys)
+    } catch (err) {
+      console.error('projectSceneRaw failed for node', id, err)
+    } finally {
+      solid?.delete()
+    }
   }
+  return groups
 }
 
 /** Triangle count + volume (mm³) of a subtree. */

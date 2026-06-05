@@ -2,8 +2,15 @@
 import type { ReactNode } from 'react'
 import { useCadStore } from '../document/store'
 import { useSketchStore } from '../sketch/sketchStore'
-import type { PrimitiveNode, PrimitiveParams } from '../document/types'
+import type { PlaneDefinition, PrimitiveNode, PrimitiveParams } from '../document/types'
 import { NumberField, Vec3Field } from './NumberField'
+
+const PLANE_KIND_LABEL: Record<PlaneDefinition['kind'], string> = {
+  offset: 'Offset from a cardinal plane',
+  face: 'Offset from a face',
+  threePoints: 'Through three points',
+  edgeAngle: 'Angle about an edge',
+}
 
 function EditSketchButton({ nodeId }: { nodeId: string }) {
   const editSketch = useSketchStore((s) => s.editSketch)
@@ -156,7 +163,111 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
   }
 }
 
+function PlaneEditor({ width, planeId }: { width: number; planeId: string }) {
+  const plane = useCadStore((s) => s.doc.planes[planeId])
+  const renamePlane = useCadStore((s) => s.renamePlane)
+  const setPlaneDefinition = useCadStore((s) => s.setPlaneDefinition)
+  const setPlaneVisible = useCadStore((s) => s.setPlaneVisible)
+  const deletePlane = useCadStore((s) => s.deletePlane)
+
+  if (!plane) {
+    return (
+      <PropertyShell width={width}>
+        <p className="text-sm text-fg-faint">Select something to edit it.</p>
+      </PropertyShell>
+    )
+  }
+
+  const def = plane.definition
+  return (
+    <PropertyShell width={width}>
+      <div className="space-y-4">
+        <input
+          value={plane.name}
+          onChange={(e) => renamePlane(planeId, e.target.value)}
+          className="w-full rounded bg-elevated px-2 py-1 text-sm text-fg-strong outline-none focus:ring-1 focus:ring-accent-ring"
+        />
+        <div className="text-xs text-fg-faint">{PLANE_KIND_LABEL[def.kind]}</div>
+
+        {def.kind === 'offset' && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-fg-faint">Base</span>
+              <div className="flex overflow-hidden rounded border border-line-strong">
+                {(['xy', 'xz', 'yz'] as const).map((b) => (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => setPlaneDefinition(planeId, { ...def, base: b })}
+                    className={
+                      'px-2 py-0.5 text-xs uppercase ' +
+                      (def.base === b
+                        ? 'bg-accent text-on-accent'
+                        : 'text-fg-muted hover:bg-elevated')
+                    }
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Field label="Offset (mm)">
+              <NumberField
+                value={def.distance}
+                step={1}
+                onCommit={(distance) => setPlaneDefinition(planeId, { ...def, distance })}
+              />
+            </Field>
+          </div>
+        )}
+
+        {def.kind === 'face' && (
+          <Field label="Offset (mm)">
+            <NumberField
+              value={def.distance}
+              step={1}
+              onCommit={(distance) => setPlaneDefinition(planeId, { ...def, distance })}
+            />
+          </Field>
+        )}
+
+        {def.kind === 'edgeAngle' && (
+          <Field label="Angle (°)">
+            <NumberField
+              value={def.angleDeg}
+              step={5}
+              onCommit={(angleDeg) => setPlaneDefinition(planeId, { ...def, angleDeg })}
+            />
+          </Field>
+        )}
+
+        {def.kind === 'threePoints' && (
+          <p className="text-xs text-fg-faint">Defined by three picked points.</p>
+        )}
+
+        <div className="flex gap-2 border-t border-line pt-3">
+          <button
+            type="button"
+            onClick={() => setPlaneVisible(planeId, !plane.visible)}
+            className="flex-1 rounded border border-line-strong px-2 py-1 text-xs hover:bg-elevated"
+          >
+            {plane.visible ? 'Hide' : 'Show'}
+          </button>
+          <button
+            type="button"
+            onClick={() => deletePlane(planeId)}
+            className="flex-1 rounded border border-line-strong px-2 py-1 text-xs text-danger hover:bg-elevated"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </PropertyShell>
+  )
+}
+
 export function PropertyEditor({ width }: { width: number }) {
+  const planeId = useCadStore((s) => s.selectedPlaneId)
   const id = useCadStore((s) => (s.selectedIds.length === 1 ? s.selectedIds[0] : null))
   const node = useCadStore((s) => (id ? s.doc.nodes[id] : null))
   const isChild = useCadStore((s) => (id ? !s.doc.rootIds.includes(id) : false))
@@ -166,6 +277,8 @@ export function PropertyEditor({ width }: { width: number }) {
   const setNodeName = useCadStore((s) => s.setNodeName)
   const setNodeColor = useCadStore((s) => s.setNodeColor)
   const setRole = useCadStore((s) => s.setRole)
+
+  if (planeId) return <PlaneEditor width={width} planeId={planeId} />
 
   if (!node || !id) {
     return (

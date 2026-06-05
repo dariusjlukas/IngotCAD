@@ -5,7 +5,7 @@
  * this frame, so the rest of the sketcher stays plane-agnostic.
  */
 import * as THREE from 'three'
-import type { PlaneKind, SketchPlane, Transform, Vec3 } from '../document/types'
+import type { PlaneDefinition, PlaneKind, SketchPlane, Transform, Vec3 } from '../document/types'
 import { matrix4ToTransform } from '../geometry/transform'
 
 // Canonical home is document/types; re-export so imports from './plane' work.
@@ -19,6 +19,76 @@ export function cardinalPlane(kind: PlaneKind): SketchPlane {
       return { origin: [0, 0, 0], u: [1, 0, 0], v: [0, 0, 1], n: [0, -1, 0] }
     case 'yz':
       return { origin: [0, 0, 0], u: [0, 1, 0], v: [0, 0, 1], n: [1, 0, 0] }
+  }
+}
+
+/** Shift a plane's origin `distance` mm along its normal (keeps the U/V/N basis). */
+function offsetPlane(p: SketchPlane, distance: number): SketchPlane {
+  return {
+    ...p,
+    origin: [
+      p.origin[0] + p.n[0] * distance,
+      p.origin[1] + p.n[1] * distance,
+      p.origin[2] + p.n[2] * distance,
+    ],
+  }
+}
+
+/** Plane through three points: a = origin, a→b = U, normal = (b−a)×(c−a). */
+export function planeFromThreePoints(a: Vec3, b: Vec3, c: Vec3): SketchPlane {
+  const A = new THREE.Vector3(...a)
+  const ab = new THREE.Vector3(...b).sub(A)
+  const ac = new THREE.Vector3(...c).sub(A)
+  let n = new THREE.Vector3().crossVectors(ab, ac)
+  if (n.lengthSq() < 1e-12) n = new THREE.Vector3(0, 0, 1) // collinear → fall back to Z-up
+  n.normalize()
+  let u = ab.clone()
+  if (u.lengthSq() < 1e-12) u = new THREE.Vector3(1, 0, 0) // a == b → arbitrary in-plane axis
+  // Re-orthogonalize U against N (it already is when the points are valid).
+  u.addScaledVector(n, -u.dot(n)).normalize()
+  const v = new THREE.Vector3().crossVectors(n, u).normalize()
+  return { origin: [...a], u: [u.x, u.y, u.z], v: [v.x, v.y, v.z], n: [n.x, n.y, n.z] }
+}
+
+/**
+ * Plane hinged about an edge: start from `refNormal` (made perpendicular to the
+ * edge), rotate it `angleDeg` about the edge `axis`, and keep the axis in-plane
+ * (it becomes U, the hinge line). angle 0 reproduces the reference plane.
+ */
+export function planeFromEdgeAngle(
+  origin: Vec3,
+  axis: Vec3,
+  refNormal: Vec3,
+  angleDeg: number,
+): SketchPlane {
+  const ax = new THREE.Vector3(...axis)
+  if (ax.lengthSq() < 1e-12) ax.set(1, 0, 0)
+  ax.normalize()
+  // Project the reference normal perpendicular to the axis.
+  let n0 = new THREE.Vector3(...refNormal)
+  n0.addScaledVector(ax, -n0.dot(ax))
+  if (n0.lengthSq() < 1e-12) {
+    // refNormal is parallel to the axis: choose any perpendicular to the axis.
+    n0 = new THREE.Vector3(1, 0, 0).addScaledVector(ax, -ax.x)
+    if (n0.lengthSq() < 1e-12) n0 = new THREE.Vector3(0, 1, 0).addScaledVector(ax, -ax.y)
+  }
+  n0.normalize()
+  const n = n0.applyAxisAngle(ax, (angleDeg * Math.PI) / 180).normalize()
+  const v = new THREE.Vector3().crossVectors(n, ax).normalize()
+  return { origin: [...origin], u: [ax.x, ax.y, ax.z], v: [v.x, v.y, v.z], n: [n.x, n.y, n.z] }
+}
+
+/** Resolve a construction-plane definition to a concrete sketch-plane frame. */
+export function resolvePlaneDefinition(def: PlaneDefinition): SketchPlane {
+  switch (def.kind) {
+    case 'offset':
+      return offsetPlane(cardinalPlane(def.base), def.distance)
+    case 'face':
+      return offsetPlane(planeFromFace(def.origin, def.normal), def.distance)
+    case 'threePoints':
+      return planeFromThreePoints(def.a, def.b, def.c)
+    case 'edgeAngle':
+      return planeFromEdgeAngle(def.origin, def.axis, def.refNormal, def.angleDeg)
   }
 }
 

@@ -4,10 +4,15 @@
  */
 import { useEffect } from 'react'
 import { useSketchStore } from './sketchStore'
+import { useCadStore } from '../document/store'
+import { resolvePlaneDefinition } from './plane'
 
 export function PlanePicker() {
   const chooseCardinal = useSketchStore((s) => s.chooseCardinal)
+  const chooseConstructionPlane = useSketchStore((s) => s.chooseConstructionPlane)
   const cancel = useSketchStore((s) => s.cancel)
+  const planeOrder = useCadStore((s) => s.doc.planeOrder)
+  const planes = useCadStore((s) => s.doc.planes)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -36,6 +41,28 @@ export function PlanePicker() {
         Right (YZ)
       </button>
       <span className="text-xs text-fg-faint">or click a face of an object</span>
+      {planeOrder.length > 0 && (
+        <>
+          <div className="mx-0.5 h-5 w-px bg-line-strong" />
+          {planeOrder.map((id) => {
+            const p = planes[id]
+            if (!p) return null
+            return (
+              <button
+                key={id}
+                type="button"
+                className={btn}
+                title="Sketch on this construction plane"
+                onClick={() =>
+                  chooseConstructionPlane(resolvePlaneDefinition(p.definition), p.name)
+                }
+              >
+                {p.name}
+              </button>
+            )
+          })}
+        </>
+      )}
       <button
         type="button"
         className="rounded px-2 py-1 text-sm text-fg-muted hover:bg-elevated"

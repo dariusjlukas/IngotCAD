@@ -121,6 +121,8 @@ function usePreviewGeometry(pending: PendingOp | null): THREE.BufferGeometry | n
       rootIds: ['preview'],
       assets: {},
       featureOrder: ['preview'],
+      planes: {},
+      planeOrder: [],
     }
     let cancelled = false
     engine.computeMesh(doc, 'preview').then((raw) => {

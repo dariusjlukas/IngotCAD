@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { cardinalPlane, localToWorldMatrix, planeFromFace, planeToNodeTransform } from './plane'
+import {
+  cardinalPlane,
+  localToWorldMatrix,
+  planeFromFace,
+  planeToNodeTransform,
+  resolvePlaneDefinition,
+} from './plane'
 import type { SketchPlane } from './plane'
 import type { Vec3 } from '../document/types'
 
@@ -55,5 +61,84 @@ describe('sketch plane', () => {
     close(t.position, [12, -7, 0])
     t.rotationDeg.forEach((d) => expect(Math.abs(d)).toBeCloseTo(0))
     close(t.scale, [1, 1, 1])
+  })
+})
+
+const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+const crossV = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+]
+
+/** Every resolved plane must be a right-handed orthonormal frame (n = u × v). */
+function expectOrthonormal(p: SketchPlane) {
+  expect(dot(p.u, p.u)).toBeCloseTo(1, 6)
+  expect(dot(p.v, p.v)).toBeCloseTo(1, 6)
+  expect(dot(p.n, p.n)).toBeCloseTo(1, 6)
+  expect(dot(p.u, p.v)).toBeCloseTo(0, 6)
+  expect(dot(p.u, p.n)).toBeCloseTo(0, 6)
+  expect(dot(p.v, p.n)).toBeCloseTo(0, 6)
+  close(crossV(p.u, p.v), p.n)
+}
+
+describe('resolvePlaneDefinition', () => {
+  it('offset from a cardinal plane shifts the origin along the normal', () => {
+    const p = resolvePlaneDefinition({ kind: 'offset', base: 'xy', distance: 10 })
+    expect(p.origin).toEqual([0, 0, 10])
+    expect(p.n).toEqual([0, 0, 1])
+    expectOrthonormal(p)
+  })
+
+  it('offset from a picked face offsets along the face normal', () => {
+    const p = resolvePlaneDefinition({
+      kind: 'face',
+      origin: [5, 5, 5],
+      normal: [0, 0, 1],
+      distance: 2,
+    })
+    expect(p.origin[2]).toBeCloseTo(7, 6)
+    expect(p.n[2]).toBeCloseTo(1, 6)
+    expectOrthonormal(p)
+  })
+
+  it('through three points spans the plane they lie in', () => {
+    const p = resolvePlaneDefinition({
+      kind: 'threePoints',
+      a: [0, 0, 5],
+      b: [10, 0, 5],
+      c: [0, 10, 5],
+    })
+    expect(p.origin).toEqual([0, 0, 5])
+    expect(p.n[2]).toBeCloseTo(1, 6) // points on z=5 → normal +Z
+    expect(p.u).toEqual([1, 0, 0]) // a→b is +X
+    expectOrthonormal(p)
+  })
+
+  it('angle about an edge hinges the reference normal around the axis', () => {
+    const p = resolvePlaneDefinition({
+      kind: 'edgeAngle',
+      origin: [0, 0, 0],
+      axis: [1, 0, 0],
+      refNormal: [0, 0, 1],
+      angleDeg: 90,
+    })
+    // +Z rotated +90° about +X → −Y; the axis stays in-plane as U.
+    close(p.n, [0, -1, 0])
+    expect(p.u).toEqual([1, 0, 0])
+    expectOrthonormal(p)
+  })
+
+  it('angle 0 about an edge reproduces the reference plane', () => {
+    const p = resolvePlaneDefinition({
+      kind: 'edgeAngle',
+      origin: [1, 2, 3],
+      axis: [1, 0, 0],
+      refNormal: [0, 0, 1],
+      angleDeg: 0,
+    })
+    expect(p.n[2]).toBeCloseTo(1, 6)
+    expect(p.origin).toEqual([1, 2, 3])
+    expectOrthonormal(p)
   })
 })

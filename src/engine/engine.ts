@@ -49,8 +49,12 @@ class Engine {
     return measureSolid(this.module!, doc, id)
   }
 
-  /** Outline polygons of the visible scene projected onto a sketch plane. */
-  async projectScene(doc: CadDocument, rootIds: NodeId[], invMatrix: number[]): Promise<Vec2[][]> {
+  /** In-plane section outlines of the visible scene, one polygon-group per geometry. */
+  async projectScene(
+    doc: CadDocument,
+    rootIds: NodeId[],
+    invMatrix: number[],
+  ): Promise<Vec2[][][]> {
     await this.ready
     return projectSceneRaw(this.module!, doc, rootIds, invMatrix)
   }

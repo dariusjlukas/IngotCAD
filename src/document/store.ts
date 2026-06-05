@@ -16,6 +16,7 @@ import type {
   CadNode,
   MeshAsset,
   NodeId,
+  PlaneDefinition,
   PrimitiveParams,
   PrimitiveType,
   Role,
@@ -207,6 +208,8 @@ function cloneSubtree(src: CloneSource, doc: CadDocument, srcId: NodeId): NodeId
 export interface CadState {
   doc: CadDocument
   selectedIds: NodeId[]
+  /** The selected construction plane, if any. Mutually exclusive with node selection. */
+  selectedPlaneId: string | null
   past: CadDocument[]
   future: CadDocument[]
   /** Running counter used to name new nodes. Not part of history. */
@@ -222,6 +225,15 @@ export interface CadState {
   select: (ids: NodeId[]) => void
   toggleSelect: (id: NodeId) => void
   clearSelection: () => void
+  /** Select a construction plane (clears node selection); null to deselect. */
+  selectPlane: (id: string | null) => void
+
+  // construction planes (datums — reference geometry, not solids)
+  addPlane: (definition: PlaneDefinition, name?: string) => string
+  renamePlane: (id: string, name: string) => void
+  setPlaneVisible: (id: string, visible: boolean) => void
+  setPlaneDefinition: (id: string, definition: PlaneDefinition) => void
+  deletePlane: (id: string) => void
 
   // creation / structure
   addPrimitive: (type: PrimitiveType) => NodeId
@@ -326,6 +338,7 @@ export const useCadStore = create<CadState>()((set, get) => {
   return {
     doc: createEmptyDocument(),
     selectedIds: [],
+    selectedPlaneId: null,
     past: [],
     future: [],
     counter: 0,
@@ -333,14 +346,51 @@ export const useCadStore = create<CadState>()((set, get) => {
     dirty: false,
     clipboard: null,
 
-    select: (ids) => set({ selectedIds: ids }),
+    select: (ids) => set({ selectedIds: ids, selectedPlaneId: null }),
     toggleSelect: (id) =>
       set((state) => ({
+        selectedPlaneId: null,
         selectedIds: state.selectedIds.includes(id)
           ? state.selectedIds.filter((s) => s !== id)
           : [...state.selectedIds, id],
       })),
-    clearSelection: () => set({ selectedIds: [] }),
+    clearSelection: () => set({ selectedIds: [], selectedPlaneId: null }),
+    selectPlane: (id) => set({ selectedPlaneId: id, selectedIds: [] }),
+
+    addPlane: (definition, name) => {
+      const id = nanoid()
+      const planeName = name ?? nextName('Plane')
+      mutate((doc) => {
+        doc.planes[id] = { id, name: planeName, visible: true, definition }
+        doc.planeOrder.push(id)
+      })
+      set({ selectedPlaneId: id, selectedIds: [] })
+      return id
+    },
+    renamePlane: (id, name) =>
+      mutate((doc) => {
+        const p = doc.planes[id]
+        if (p) p.name = name
+      }),
+    setPlaneVisible: (id, visible) =>
+      mutate((doc) => {
+        const p = doc.planes[id]
+        if (p) p.visible = visible
+      }),
+    setPlaneDefinition: (id, definition) =>
+      mutate((doc) => {
+        const p = doc.planes[id]
+        if (p) p.definition = definition
+      }),
+    deletePlane: (id) => {
+      mutate((doc) => {
+        delete doc.planes[id]
+        doc.planeOrder = doc.planeOrder.filter((p) => p !== id)
+      })
+      set((state) => ({
+        selectedPlaneId: state.selectedPlaneId === id ? null : state.selectedPlaneId,
+      }))
+    },
 
     addPrimitive: (type) => {
       const id = nanoid()
@@ -714,6 +764,7 @@ export const useCadStore = create<CadState>()((set, get) => {
         past: [],
         future: [],
         selectedIds: [],
+        selectedPlaneId: null,
         counter: 0,
         documentName: name,
         dirty: false,
@@ -724,6 +775,7 @@ export const useCadStore = create<CadState>()((set, get) => {
         past: [],
         future: [],
         selectedIds: [],
+        selectedPlaneId: null,
         counter: 0,
         documentName: 'Untitled',
         dirty: false,
@@ -740,6 +792,10 @@ export const useCadStore = create<CadState>()((set, get) => {
           past: state.past.slice(0, -1),
           future: [state.doc, ...state.future],
           selectedIds: state.selectedIds.filter((id) => previous.nodes[id]),
+          selectedPlaneId:
+            state.selectedPlaneId && previous.planes[state.selectedPlaneId]
+              ? state.selectedPlaneId
+              : null,
           dirty: true,
         }
       }),
@@ -753,6 +809,10 @@ export const useCadStore = create<CadState>()((set, get) => {
           past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
           future: state.future.slice(1),
           selectedIds: state.selectedIds.filter((id) => next.nodes[id]),
+          selectedPlaneId:
+            state.selectedPlaneId && next.planes[state.selectedPlaneId]
+              ? state.selectedPlaneId
+              : null,
           dirty: true,
         }
       }),

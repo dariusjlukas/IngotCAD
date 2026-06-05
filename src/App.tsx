@@ -16,6 +16,7 @@ import { Viewport } from './viewport/Viewport'
 import { SketchCanvas } from './sketch/SketchCanvas'
 import { SketchProperties, SketchToolbar, SketchToolsPanel } from './sketch/SketchPanels'
 import { PlanePicker } from './sketch/PlanePicker'
+import { PlaneBuilderOverlay } from './viewport/PlaneBuilderOverlay'
 import { OperationConfirm } from './operation/OperationConfirm'
 import { Timeline } from './ui/Timeline'
 import { engine } from './engine/engine'
@@ -105,14 +106,17 @@ function useKeyboardShortcuts(): void {
       if (e.key === 'Escape') {
         // Let an open dialog/menu handle Escape itself; otherwise deselect.
         if (useDialogStore.getState().open || useContextMenuStore.getState().open) return
-        if (store.selectedIds.length) {
+        if (store.selectedIds.length || store.selectedPlaneId) {
           e.preventDefault()
           store.clearSelection()
         }
         return
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (store.selectedIds.length) {
+        if (store.selectedPlaneId) {
+          e.preventDefault()
+          store.deletePlane(store.selectedPlaneId)
+        } else if (store.selectedIds.length) {
           e.preventDefault()
           store.deleteNodes(store.selectedIds)
         }
@@ -167,6 +171,7 @@ export default function App() {
           <Viewport />
           {sketching && <SketchCanvas />}
           {choosingPlane && <PlanePicker />}
+          {!sketching && <PlaneBuilderOverlay />}
           <OperationConfirm />
           {!ready && !sketching && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-overlay text-sm text-fg-muted">
