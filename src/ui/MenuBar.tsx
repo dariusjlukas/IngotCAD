@@ -133,9 +133,7 @@ export function MenuBar() {
         alt=""
         className="ml-1 mr-1 h-5 w-5 shrink-0"
       />
-      <span className="mr-2 shrink-0 select-none text-sm font-semibold text-fg-strong">
-        Ingot
-      </span>
+      <span className="mr-2 shrink-0 select-none text-sm font-semibold text-fg-strong">Ingot</span>
 
       <Menu label="File">
         <MenuItem onSelect={newProject} shortcut="⌘N">
