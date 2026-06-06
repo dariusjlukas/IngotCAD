@@ -14,9 +14,5 @@ export function CadScene() {
       : null,
   )
   const hiddenRoot = useCadStore((s) => (previewSource ? rootOf(s.doc, previewSource) : null))
-  return (
-    <>
-      {rootIds.map((id) => (id === hiddenRoot ? null : <NodeView key={id} id={id} />))}
-    </>
-  )
+  return <>{rootIds.map((id) => (id === hiddenRoot ? null : <NodeView key={id} id={id} />))}</>
 }

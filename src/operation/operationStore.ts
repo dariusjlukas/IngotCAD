@@ -97,7 +97,11 @@ export const useOperationStore = create<OperationState>((set, get) => ({
       if (s.pending.mode !== 'extrude') {
         return { pending: { ...s.pending, value: clampValue('revolve', signed) } }
       }
-      const next = { ...s.pending, flip: signed < 0, value: clampValue('extrude', Math.abs(signed)) }
+      const next = {
+        ...s.pending,
+        flip: signed < 0,
+        value: clampValue('extrude', Math.abs(signed)),
+      }
       return { pending: { ...next, combine: autoCombine(next) } }
     }),
   toggleFlip: () =>

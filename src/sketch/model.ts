@@ -106,10 +106,7 @@ export function loopOutline(data: SketchData, loop: LoopShape, segments = FILLET
 }
 
 /** Neighbour positions of a loop corner (cyclic); null for non-corner points. */
-export function cornerNeighbors(
-  data: SketchData,
-  pid: PointId,
-): { prev: Vec2; next: Vec2 } | null {
+export function cornerNeighbors(data: SketchData, pid: PointId): { prev: Vec2; next: Vec2 } | null {
   for (const s of data.shapes) {
     if (s.kind !== 'loop') continue
     const i = s.pts.indexOf(pid)

@@ -419,7 +419,12 @@ export function SketchProperties() {
             {cornerInfo.treatment &&
               (() => {
                 const t = cornerInfo.treatment
-                const max = maxCornerSize(cornerInfo.prev, cornerInfo.corner, cornerInfo.next, t.kind)
+                const max = maxCornerSize(
+                  cornerInfo.prev,
+                  cornerInfo.corner,
+                  cornerInfo.next,
+                  t.kind,
+                )
                 return (
                   <label className="flex items-center justify-between gap-2">
                     <span className="text-xs text-fg-faint">
@@ -429,7 +434,9 @@ export function SketchProperties() {
                       <NumberField
                         value={t.size}
                         min={0.1}
-                        onCommit={(v) => setCornerTreatment(cornerInfo.pid, t.kind, Math.min(max, v))}
+                        onCommit={(v) =>
+                          setCornerTreatment(cornerInfo.pid, t.kind, Math.min(max, v))
+                        }
                       />
                     </div>
                   </label>
