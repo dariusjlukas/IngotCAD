@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   bboxCenter,
   cleanContours,
+  cornerPoints,
   distance,
   ensureCCW,
   makeCircle,
   makeRectangle,
+  maxCornerSize,
   niceStep,
   pointInPolygon,
   signedArea,
@@ -98,5 +100,50 @@ describe('sketch geometry', () => {
     expect(niceStep(240)).toBe(20)
     expect(niceStep(20)).toBe(1)
     expect(niceStep(2000)).toBe(100)
+  })
+
+  // A right-angle corner at the origin: previous neighbour along +X, next along +Y.
+  const prev: Vec2 = [10, 0]
+  const corner: Vec2 = [0, 0]
+  const next: Vec2 = [0, 10]
+
+  it('cornerPoints fillets a 90° corner into a tangent arc', () => {
+    const arc = cornerPoints(prev, corner, next, 'fillet', 3)
+    expect(arc.length).toBeGreaterThan(2)
+    // Tangent points sit at the setback (r for a right angle) on each edge.
+    expect(arc[0][0]).toBeCloseTo(3)
+    expect(arc[0][1]).toBeCloseTo(0)
+    expect(arc[arc.length - 1][0]).toBeCloseTo(0)
+    expect(arc[arc.length - 1][1]).toBeCloseTo(3)
+    // Every point lies on a circle of radius 3 centered on the bisector at (3,3).
+    for (const p of arc) expect(distance([3, 3], p)).toBeCloseTo(3)
+  })
+
+  it('cornerPoints chamfers a 90° corner into two setback points', () => {
+    expect(cornerPoints(prev, corner, next, 'chamfer', 3)).toEqual([
+      [3, 0],
+      [0, 3],
+    ])
+  })
+
+  it('cornerPoints clamps an oversized treatment to half the shorter edge', () => {
+    // Edges are length 10, so the per-edge setback caps at 5.
+    expect(cornerPoints(prev, corner, next, 'chamfer', 100)).toEqual([
+      [5, 0],
+      [0, 5],
+    ])
+    const arc = cornerPoints(prev, corner, next, 'fillet', 100)
+    expect(arc[0][0]).toBeCloseTo(5)
+    expect(arc[arc.length - 1][1]).toBeCloseTo(5)
+  })
+
+  it('cornerPoints leaves a collinear (degenerate) corner unchanged', () => {
+    expect(cornerPoints([10, 0], [0, 0], [-10, 0], 'fillet', 3)).toEqual([[0, 0]])
+  })
+
+  it('maxCornerSize caps fillet/chamfer at half the shorter edge', () => {
+    expect(maxCornerSize(prev, corner, next, 'chamfer')).toBeCloseTo(5)
+    // A right-angle fillet radius equals its setback, so the cap is also 5.
+    expect(maxCornerSize(prev, corner, next, 'fillet')).toBeCloseTo(5)
   })
 })

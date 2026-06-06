@@ -32,11 +32,28 @@ export interface PendingOp {
   sourceNodeId: NodeId | null
   /** How the result folds into `sourceNodeId` (ignored when it's null). */
   combine: CombineMode
+  /**
+   * True once the user has explicitly chosen a combine mode. Until then `combine`
+   * auto-tracks the extrude direction (union when extruding away from the source
+   * body, subtract when extruding into it); an explicit choice stops that.
+   */
+  combineUserSet: boolean
 }
 
 /** What `start` accepts; `combine` is defaulted from `sourceNodeId`. */
-export type NewOp = Omit<PendingOp, 'combine' | 'sourceNodeId'> & {
+export type NewOp = Omit<PendingOp, 'combine' | 'combineUserSet' | 'sourceNodeId'> & {
   sourceNodeId?: NodeId | null
+}
+
+/**
+ * The combine mode to use while the user hasn't overridden it: extruding away
+ * from the source body (`flip` false, along the outward face normal) adds
+ * material (union); extruding into it (`flip` true) removes material (subtract).
+ * No-op once the user has set it, or when there's no source object.
+ */
+function autoCombine(p: PendingOp): CombineMode {
+  if (!p.sourceNodeId || p.combineUserSet) return p.combine
+  return p.flip ? 'subtract' : 'union'
 }
 
 function clampValue(mode: PendingOp['mode'], v: number): number {
@@ -64,8 +81,10 @@ export const useOperationStore = create<OperationState>((set, get) => ({
         ...op,
         value: clampValue(op.mode, op.value),
         sourceNodeId: op.sourceNodeId ?? null,
-        // Default to union when sketched on an object, else a standalone object.
-        combine: op.sourceNodeId ? 'union' : 'new',
+        // Sketched on an object: default to union/subtract by direction (see
+        // autoCombine). Otherwise it's a standalone object.
+        combine: op.sourceNodeId ? (op.flip ? 'subtract' : 'union') : 'new',
+        combineUserSet: false,
       },
     }),
   setValue: (value) =>
@@ -78,13 +97,17 @@ export const useOperationStore = create<OperationState>((set, get) => ({
       if (s.pending.mode !== 'extrude') {
         return { pending: { ...s.pending, value: clampValue('revolve', signed) } }
       }
-      return {
-        pending: { ...s.pending, flip: signed < 0, value: clampValue('extrude', Math.abs(signed)) },
-      }
+      const next = { ...s.pending, flip: signed < 0, value: clampValue('extrude', Math.abs(signed)) }
+      return { pending: { ...next, combine: autoCombine(next) } }
     }),
   toggleFlip: () =>
-    set((s) => (s.pending ? { pending: { ...s.pending, flip: !s.pending.flip } } : {})),
-  setCombine: (combine) => set((s) => (s.pending ? { pending: { ...s.pending, combine } } : {})),
+    set((s) => {
+      if (!s.pending) return {}
+      const next = { ...s.pending, flip: !s.pending.flip }
+      return { pending: { ...next, combine: autoCombine(next) } }
+    }),
+  setCombine: (combine) =>
+    set((s) => (s.pending ? { pending: { ...s.pending, combine, combineUserSet: true } } : {})),
   confirm: () => {
     const op = get().pending
     if (!op) return

@@ -1,7 +1,7 @@
 /** Sketch-mode state: a constraint-based sketch + selection + view + extrude height. */
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { NodeId, SketchSource, Vec2, Vec3 } from '../document/types'
+import type { CornerTreatment, NodeId, SketchSource, Vec2, Vec3 } from '../document/types'
 import { useOperationStore } from '../operation/operationStore'
 import { useCadStore } from '../document/store'
 import type { ConstraintId, ConstraintInput, PointId, ShapeId, SketchData, SPoint } from './model'
@@ -13,7 +13,14 @@ import { cardinalPlane, planeFromFace, planeToTransform } from './plane'
 const CARDINAL_LABEL: Record<PlaneKind, string> = { xy: 'Top', xz: 'Front', yz: 'Right' }
 
 /** Drawing tools. `null` means Select mode (the absence of a tool). */
-export type SketchTool = 'line' | 'rectangle' | 'circle' | 'dimension' | 'project'
+export type SketchTool =
+  | 'line'
+  | 'rectangle'
+  | 'circle'
+  | 'dimension'
+  | 'project'
+  | 'fillet'
+  | 'chamfer'
 
 export interface View {
   cx: number
@@ -30,12 +37,22 @@ export type Ref =
 
 const id = () => nanoid(8)
 
+function cloneCorners(c: Record<PointId, CornerTreatment>): Record<PointId, CornerTreatment> {
+  const out: Record<PointId, CornerTreatment> = {}
+  for (const [k, v] of Object.entries(c)) out[k] = { ...v }
+  return out
+}
+
 function cloneData(d: SketchData): SketchData {
   const points: Record<PointId, SPoint> = {}
   for (const [k, p] of Object.entries(d.points)) points[k] = { ...p }
   return {
     points,
-    shapes: d.shapes.map((s) => (s.kind === 'loop' ? { ...s, pts: [...s.pts] } : { ...s })),
+    shapes: d.shapes.map((s) =>
+      s.kind === 'loop'
+        ? { ...s, pts: [...s.pts], ...(s.corners && { corners: cloneCorners(s.corners) }) }
+        : { ...s },
+    ),
     constraints: d.constraints.map((c) => ({ ...c })),
   }
 }
@@ -90,6 +107,10 @@ interface SketchState {
   setCircleRadius: (shapeId: ShapeId, r: number) => void
   setPointPos: (pid: PointId, x: number, y: number) => void
   togglePointFixed: (ids: PointId[]) => void
+  /** Add/replace a fillet or chamfer on the loop corner at `pid`. */
+  setCornerTreatment: (pid: PointId, kind: 'fillet' | 'chamfer', size: number) => void
+  /** Remove any fillet/chamfer from the loop corner at `pid`. */
+  removeCornerTreatment: (pid: PointId) => void
 
   dragPoint: (pid: PointId, x: number, y: number) => void
 
@@ -328,6 +349,22 @@ export const useSketchStore = create<SketchState>((set, get) => {
           p.x = x
           p.y = y
         }
+      }),
+
+    setCornerTreatment: (pid, kind, size) =>
+      update((d) => {
+        const loop = d.shapes.find((s) => s.kind === 'loop' && s.pts.includes(pid))
+        if (!loop || loop.kind !== 'loop') return
+        if (!loop.corners) loop.corners = {}
+        loop.corners[pid] = { kind, size: Math.max(0.1, size) }
+      }),
+
+    removeCornerTreatment: (pid) =>
+      update((d) => {
+        const loop = d.shapes.find((s) => s.kind === 'loop' && s.corners && pid in s.corners)
+        if (!loop || loop.kind !== 'loop' || !loop.corners) return
+        delete loop.corners[pid]
+        if (Object.keys(loop.corners).length === 0) delete loop.corners
       }),
 
     togglePointFixed: (ids) =>

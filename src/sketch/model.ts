@@ -13,10 +13,13 @@ import type {
   PointId,
   ShapeId,
   SketchData,
+  SketchShape,
   SPoint,
   Vec2,
 } from '../document/types'
-import { ensureCCW, makeCircle } from './geometry'
+import { cornerPoints, ensureCCW, FILLET_SEGMENTS, makeCircle } from './geometry'
+
+type LoopShape = Extract<SketchShape, { kind: 'loop' }>
 
 // Canonical home of these types is document/types; re-export so existing
 // imports from './model' keep working.
@@ -76,16 +79,58 @@ export function constraintLabel(c: Constraint): string {
   return `${KIND_SHORT[c.kind]} ${c.kind}`
 }
 
+/**
+ * A loop's outline (mm, Y-up), with any fillet/chamfer corners expanded to
+ * points. The single source of the expanded shape — used by both contour
+ * extraction (below) and the on-screen sketch path so they always agree.
+ */
+export function loopOutline(data: SketchData, loop: LoopShape, segments = FILLET_SEGMENTS): Vec2[] {
+  const verts = loop.pts
+    .map((id) => ({ id, p: data.points[id] }))
+    .filter((v): v is { id: PointId; p: SPoint } => Boolean(v.p))
+  const n = verts.length
+  const base = verts.map((v) => [v.p.x, v.p.y] as Vec2)
+  if (!loop.corners || n < 3) return base
+  const out: Vec2[] = []
+  for (let i = 0; i < n; i++) {
+    const t = loop.corners[verts[i].id]
+    if (t && t.size > 0) {
+      const prev = base[(i - 1 + n) % n]
+      const next = base[(i + 1) % n]
+      out.push(...cornerPoints(prev, base[i], next, t.kind, t.size, segments))
+    } else {
+      out.push(base[i])
+    }
+  }
+  return out
+}
+
+/** Neighbour positions of a loop corner (cyclic); null for non-corner points. */
+export function cornerNeighbors(
+  data: SketchData,
+  pid: PointId,
+): { prev: Vec2; next: Vec2 } | null {
+  for (const s of data.shapes) {
+    if (s.kind !== 'loop') continue
+    const i = s.pts.indexOf(pid)
+    if (i < 0) continue
+    const n = s.pts.length
+    if (n < 3) return null
+    return {
+      prev: pointPos(data, s.pts[(i - 1 + n) % n]),
+      next: pointPos(data, s.pts[(i + 1) % n]),
+    }
+  }
+  return null
+}
+
 /** Solved closed contours (mm, Y-up) for extrusion. Construction shapes are reference-only. */
 export function shapeContours(data: SketchData): Vec2[][] {
   const out: Vec2[][] = []
   for (const s of data.shapes) {
     if (s.construction) continue
     if (s.kind === 'loop') {
-      const pts = s.pts
-        .map((id) => data.points[id])
-        .filter((p): p is SPoint => Boolean(p))
-        .map((p) => [p.x, p.y] as Vec2)
+      const pts = loopOutline(data, s)
       if (pts.length >= 3) out.push(ensureCCW(pts))
     } else {
       const c = data.points[s.c]

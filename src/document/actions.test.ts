@@ -86,6 +86,28 @@ describe('document actions', () => {
     ).toBe(true)
   })
 
+  it('union and subtract extrude both take on the parent object color', () => {
+    const box = store().addPrimitive('box')
+    store().setNodeColor(box, '#123456')
+    const u = store().addExtrusion(TRI, 5, IDENTITY_TRANSFORM, false, SRC, {
+      targetId: box,
+      op: 'union',
+    })!
+    const unionNode = store().doc.nodes[u]
+    expect(unionNode.kind).toBe('boolean')
+    expect(unionNode.color).toBe('#123456')
+
+    const box2 = store().addPrimitive('box')
+    store().setNodeColor(box2, '#abcdef')
+    const s = store().addExtrusion(TRI, 5, IDENTITY_TRANSFORM, false, SRC, {
+      targetId: box2,
+      op: 'subtract',
+    })!
+    const subNode = store().doc.nodes[s]
+    expect(subNode.kind).toBe('boolean')
+    expect(subNode.color).toBe('#abcdef')
+  })
+
   it('setNodeSketch replaces the profile + sketch in place (keeping height)', () => {
     const id = store().addExtrusion(TRI, 7, IDENTITY_TRANSFORM, false, SRC)!
     const newProfile: [number, number][][] = [

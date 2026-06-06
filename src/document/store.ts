@@ -138,7 +138,7 @@ function parentArray(doc: CadDocument, id: NodeId): NodeId[] | null {
 }
 
 /** The top-level (root) ancestor of `id`. */
-function rootOf(doc: CadDocument, id: NodeId): NodeId {
+export function rootOf(doc: CadDocument, id: NodeId): NodeId {
   let cur = id
   for (let p = parentNodeId(doc, cur); p; p = parentNodeId(doc, cur)) cur = p
   return cur
@@ -173,8 +173,10 @@ export interface CombineTarget {
  * Fold a just-created root solid `newId` into the root containing `targetId`,
  * replacing both roots with a boolean of the two (mutating the immer draft).
  * Child order is [target, new] so `subtract` cuts the new solid out of the
- * target. Returns the boolean's id, or null if the target root is gone or is
- * the new solid itself (in which case the caller keeps the standalone solid).
+ * target. Either way the result is the target object modified in place, so it
+ * keeps the target's color. Returns the boolean's id, or null if the target
+ * root is gone or is the new solid itself (in which case the caller keeps the
+ * standalone solid).
  */
 function wrapInBoolean(
   doc: CadDocument,
@@ -182,7 +184,6 @@ function wrapInBoolean(
   newId: NodeId,
   op: BooleanOp,
   name: string,
-  color: string,
 ): NodeId | null {
   const targetRoot = rootOf(doc, targetId)
   if (targetRoot === newId || !doc.rootIds.includes(targetRoot) || !doc.rootIds.includes(newId))
@@ -195,7 +196,7 @@ function wrapInBoolean(
     op,
     name,
     childIds: [targetRoot, newId],
-    color,
+    color: doc.nodes[targetRoot].color,
     visible: true,
     role: 'solid',
     transform: { ...IDENTITY_TRANSFORM },
@@ -535,7 +536,6 @@ export const useCadStore = create<CadState>()((set, get) => {
       const name = nextName(TYPE_LABEL.extrusion)
       const color = PALETTE[get().counter % PALETTE.length]
       const boolName = combine ? nextName(combineLabel(combine.op)) : ''
-      const boolColor = combine ? PALETTE[get().counter % PALETTE.length] : color
       let resultId: NodeId = id
       mutate((doc) => {
         doc.nodes[id] = {
@@ -551,7 +551,7 @@ export const useCadStore = create<CadState>()((set, get) => {
         doc.rootIds.push(id)
         doc.featureOrder.push(id)
         if (combine) {
-          const bid = wrapInBoolean(doc, combine.targetId, id, combine.op, boolName, boolColor)
+          const bid = wrapInBoolean(doc, combine.targetId, id, combine.op, boolName)
           if (bid) resultId = bid
         }
       })
@@ -566,7 +566,6 @@ export const useCadStore = create<CadState>()((set, get) => {
       const name = nextName(TYPE_LABEL.revolution)
       const color = PALETTE[get().counter % PALETTE.length]
       const boolName = combine ? nextName(combineLabel(combine.op)) : ''
-      const boolColor = combine ? PALETTE[get().counter % PALETTE.length] : color
       let resultId: NodeId = id
       mutate((doc) => {
         doc.nodes[id] = {
@@ -582,7 +581,7 @@ export const useCadStore = create<CadState>()((set, get) => {
         doc.rootIds.push(id)
         doc.featureOrder.push(id)
         if (combine) {
-          const bid = wrapInBoolean(doc, combine.targetId, id, combine.op, boolName, boolColor)
+          const bid = wrapInBoolean(doc, combine.targetId, id, combine.op, boolName)
           if (bid) resultId = bid
         }
       })

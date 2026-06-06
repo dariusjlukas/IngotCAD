@@ -46,10 +46,28 @@ export interface SPoint {
   fixed: boolean
 }
 
+/**
+ * A rounded (fillet) or beveled (chamfer) treatment on a single loop corner.
+ * `size` is the fillet radius, or the chamfer's equal setback distance per edge
+ * (mm). The corner stays a real solver point — the rounded geometry is *derived*
+ * at contour/render time (see loopOutline), exactly like a circle's radius.
+ */
+export interface CornerTreatment {
+  kind: 'fillet' | 'chamfer'
+  size: number
+}
+
 // `construction` geometry is reference-only: it participates in constraints and
 // snapping but is excluded from the extrude/revolve profile (see shapeContours).
 export type SketchShape =
-  | { id: ShapeId; kind: 'loop'; pts: PointId[]; construction?: boolean }
+  | {
+      id: ShapeId
+      kind: 'loop'
+      pts: PointId[]
+      construction?: boolean
+      /** Per-corner fillet/chamfer, keyed by the corner's point id. */
+      corners?: Record<PointId, CornerTreatment>
+    }
   | { id: ShapeId; kind: 'circle'; c: PointId; r: number; construction?: boolean }
 
 export type ConstraintKind =

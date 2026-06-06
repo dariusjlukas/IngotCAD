@@ -4,14 +4,17 @@
  *  - extrude: an arrow along the plane normal; drag distance = height.
  *  - revolve: a radial handle in the plane; drag angle = sweep degrees.
  *
- * The preview reuses the engine (a one-node throwaway document) so it's exactly
- * what Confirm will create.
+ * The preview reuses the engine on a throwaway document so it's exactly what
+ * Confirm will create. When the sketch was drawn on an object and the result
+ * folds in (union/subtract), the throwaway doc also includes the source body
+ * and the boolean, so the preview shows the real combined result (e.g. a
+ * subtract actually shows the cut) — CadScene hides the live source root while
+ * this is active.
  */
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import { useOperationStore } from './operationStore'
 import type { PendingOp } from './operationStore'
@@ -19,37 +22,27 @@ import { engine } from '../engine/engine'
 import { rawMeshToGeometry } from '../geometry/manifoldToThree'
 import { rotationDegToRadians, transformToMatrix4 } from '../geometry/transform'
 import { IDENTITY_TRANSFORM } from '../document/types'
-import type { CadDocument, CadNode } from '../document/types'
+import type { BooleanOp, CadDocument, CadNode, Vec2 } from '../document/types'
+import { rootOf, useCadStore } from '../document/store'
 
-const _scratch = new THREE.Vector3()
-
-/** Keeps its children a constant on-screen size (in px) regardless of zoom/distance. */
-function ConstantSize({
-  position,
-  pixels,
-  children,
-}: {
-  position: [number, number, number]
-  pixels: number
-  children: ReactNode
-}) {
-  const ref = useRef<THREE.Group>(null)
-  const camera = useThree((s) => s.camera)
-  const viewportHeight = useThree((s) => s.size.height)
-  useFrame(() => {
-    const g = ref.current
-    if (!g) return
-    const cam = camera as THREE.PerspectiveCamera
-    const dist = cam.position.distanceTo(g.getWorldPosition(_scratch))
-    const fov = ((cam.isPerspectiveCamera ? cam.fov : 45) * Math.PI) / 180
-    const worldPerPixel = (2 * Math.tan(fov / 2) * dist) / viewportHeight
-    g.scale.setScalar(Math.max(1e-4, worldPerPixel * pixels))
-  })
-  return (
-    <group ref={ref} position={position}>
-      {children}
-    </group>
-  )
+/** Largest bounding-box dimension of the profile (mm). The drag handles are
+ *  sized as a fraction of this so they scale with the model in world space
+ *  (zooming in/out keeps them proportional to the geometry) rather than being
+ *  pinned to a fixed on-screen pixel size. */
+function profileExtent(profile: Vec2[][]): number {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const loop of profile) {
+    for (const [x, y] of loop) {
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+    }
+  }
+  return Number.isFinite(minX) ? Math.max(maxX - minX, maxY - minY) : 0
 }
 
 /** Param along the axis (base + t·dir) of the closest point to the pointer ray. */
@@ -78,8 +71,15 @@ function rayPlaneHit(
   return ray.origin.clone().addScaledVector(ray.direction, t)
 }
 
-function usePreviewGeometry(pending: PendingOp | null): THREE.BufferGeometry | null {
-  const [geo, setGeo] = useState<THREE.BufferGeometry | null>(null)
+interface PreviewGeo {
+  geo: THREE.BufferGeometry | null
+  /** True when `geo` is the combined boolean result, already in world space (so
+   *  it renders at identity, not under the sketch-plane transform). */
+  combined: boolean
+}
+
+function usePreviewGeometry(pending: PendingOp | null): PreviewGeo {
+  const [result, setResult] = useState<PreviewGeo>({ geo: null, combined: false })
   const ref = useRef<THREE.BufferGeometry | null>(null)
   useEffect(() => {
     if (!pending) {
@@ -87,7 +87,7 @@ function usePreviewGeometry(pending: PendingOp | null): THREE.BufferGeometry | n
       ref.current = null
       // Clearing the cached preview geometry when the op is dismissed.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setGeo(null)
+      setResult({ geo: null, combined: false })
       return
     }
     const params =
@@ -104,47 +104,84 @@ function usePreviewGeometry(pending: PendingOp | null): THREE.BufferGeometry | n
             degrees: pending.value,
             segments: pending.segments,
           }
-    const node: CadNode = {
-      id: 'preview',
+
+    // Folding into the source object → place the new solid in world space (carry
+    // `transform`) and evaluate the boolean. A standalone preview keeps the node
+    // at identity and the caller renders it under `transform`.
+    const combining = pending.sourceNodeId != null && pending.combine !== 'new'
+    const solid: CadNode = {
+      id: 'preview-solid',
       kind: 'primitive',
       name: 'preview',
       color: '#fff',
       visible: true,
       role: 'solid',
-      transform: IDENTITY_TRANSFORM,
+      transform: combining ? pending.transform : IDENTITY_TRANSFORM,
       params,
     }
-    const doc: CadDocument = {
-      schemaVersion: 1,
-      units: 'mm',
-      nodes: { preview: node },
-      rootIds: ['preview'],
-      assets: {},
-      featureOrder: ['preview'],
-      planes: {},
-      planeOrder: [],
+
+    let doc: CadDocument
+    let evalId: string
+    if (combining) {
+      // Mirror Confirm: wrap [sourceRoot, newSolid] in the chosen boolean and
+      // evaluate that. Live nodes are referenced read-only (never mutated), so
+      // there's no deep clone — evaluating the boolean only walks this subtree.
+      const live = useCadStore.getState().doc
+      const srcRoot = rootOf(live, pending.sourceNodeId as string)
+      const op: BooleanOp = pending.combine === 'subtract' ? 'subtract' : 'union'
+      const bool: CadNode = {
+        id: 'preview-bool',
+        kind: 'boolean',
+        op,
+        name: 'preview',
+        childIds: [srcRoot, solid.id],
+        color: '#fff',
+        visible: true,
+        role: 'solid',
+        transform: IDENTITY_TRANSFORM,
+      }
+      doc = {
+        ...live,
+        nodes: { ...live.nodes, [solid.id]: solid, [bool.id]: bool },
+        rootIds: [bool.id],
+        featureOrder: [bool.id],
+      }
+      evalId = bool.id
+    } else {
+      doc = {
+        schemaVersion: 1,
+        units: 'mm',
+        nodes: { [solid.id]: solid },
+        rootIds: [solid.id],
+        assets: {},
+        featureOrder: [solid.id],
+        planes: {},
+        planeOrder: [],
+      }
+      evalId = solid.id
     }
+
     let cancelled = false
-    engine.computeMesh(doc, 'preview').then((raw) => {
+    engine.computeMesh(doc, evalId).then((raw) => {
       if (cancelled) return
       const g = rawMeshToGeometry(raw)
       ref.current?.dispose()
       ref.current = g
-      setGeo(g)
+      setResult({ geo: g, combined: combining })
     })
     return () => {
       cancelled = true
     }
   }, [pending])
   useEffect(() => () => ref.current?.dispose(), [])
-  return geo
+  return result
 }
 
 export function OperationPreview() {
   const pending = useOperationStore((s) => s.pending)
   const setValue = useOperationStore((s) => s.setValue)
   const setSignedValue = useOperationStore((s) => s.setSignedValue)
-  const geo = usePreviewGeometry(pending)
+  const { geo, combined } = usePreviewGeometry(pending)
   // Read R3F state fresh inside handlers (s.get) so we can imperatively toggle
   // the default OrbitControls during a handle drag without mutating a value
   // captured at render time.
@@ -160,6 +197,9 @@ export function OperationPreview() {
   const nrm = new THREE.Vector3(0, 0, 1).transformDirection(m).normalize()
   const uW = new THREE.Vector3(1, 0, 0).transformDirection(m).normalize()
   const vW = new THREE.Vector3(0, 1, 0).transformDirection(m).normalize()
+
+  // Red preview when the extrude cuts into the source body; blue when it adds.
+  const previewColor = pending.combine === 'subtract' ? '#fe6e6e' : '#6ea8fe'
 
   const setOrbit = (on: boolean) => {
     const controls = get().controls as { enabled?: boolean } | null
@@ -182,9 +222,14 @@ export function OperationPreview() {
   const dir = pending.flip ? nrm.clone().negate() : nrm
   const extrudeTip = origin.clone().addScaledVector(dir, pending.value)
   const coneQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
+  // Arrowhead size in world units: a fraction of the solid's overall size, using
+  // max(profile span, height) so it reads well for both flat-wide and thin-tall
+  // solids; the floor keeps it from vanishing on a tiny profile.
+  const headLen = Math.max(profileExtent(pending.profile), pending.value, 1) * 0.24
 
   // --- revolve handle (radial point in the plane) ---
   const radius = Math.max(1, ...pending.profile.flat().map((p) => Math.abs(p[0])))
+  const handleR = radius * 0.15
   const theta = (pending.value * Math.PI) / 180
   const revHandle = origin
     .clone()
@@ -214,13 +259,13 @@ export function OperationPreview() {
       {geo && (
         <mesh
           geometry={geo}
-          position={t.position}
-          rotation={[rot[0], rot[1], rot[2]]}
-          scale={t.scale}
+          position={combined ? [0, 0, 0] : t.position}
+          rotation={combined ? [0, 0, 0] : [rot[0], rot[1], rot[2]]}
+          scale={combined ? 1 : t.scale}
           raycast={() => null}
         >
           <meshStandardMaterial
-            color="#6ea8fe"
+            color={previewColor}
             transparent
             opacity={0.55}
             flatShading
@@ -232,8 +277,8 @@ export function OperationPreview() {
       {pending.mode === 'extrude' ? (
         <>
           <Line points={[origin.toArray(), extrudeTip.toArray()]} color="#ffd866" lineWidth={2} />
-          {/* Cone is a unit size; ConstantSize keeps it the same pixel size. */}
-          <ConstantSize position={extrudeTip.toArray()} pixels={36}>
+          {/* Unit cone scaled to a world size, so it zooms with the model. */}
+          <group position={extrudeTip.toArray()} scale={headLen}>
             <mesh
               quaternion={[coneQuat.x, coneQuat.y, coneQuat.z, coneQuat.w]}
               onPointerDown={beginDrag}
@@ -243,17 +288,18 @@ export function OperationPreview() {
               <coneGeometry args={[0.4, 1, 20]} />
               <meshStandardMaterial color="#ffd866" emissive="#a98300" emissiveIntensity={0.5} />
             </mesh>
-          </ConstantSize>
+          </group>
         </>
       ) : (
         <>
           <Line points={[origin.toArray(), revHandle.toArray()]} color="#ffd866" lineWidth={2} />
-          <ConstantSize position={revHandle.toArray()} pixels={26}>
+          {/* Unit sphere scaled to a world size, so it zooms with the model. */}
+          <group position={revHandle.toArray()} scale={handleR}>
             <mesh onPointerDown={beginDrag} onPointerMove={onRevolveDrag} onPointerUp={endDrag}>
               <sphereGeometry args={[1, 20, 20]} />
               <meshStandardMaterial color="#ffd866" emissive="#a98300" emissiveIntensity={0.5} />
             </mesh>
-          </ConstantSize>
+          </group>
         </>
       )}
     </group>

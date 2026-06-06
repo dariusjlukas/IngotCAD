@@ -14,8 +14,8 @@ import type { Vec2 } from '../document/types'
 import { useSketchStore } from './sketchStore'
 import type { Ref } from './sketchStore'
 import type { PointId } from './model'
-import { loopSegments } from './model'
-import { distance, niceStep, pointInPolygon } from './geometry'
+import { cornerNeighbors, loopOutline, loopSegments } from './model'
+import { cornerPoints, distance, maxCornerSize, niceStep, pointInPolygon } from './geometry'
 import { worldToLocalMatrix } from './plane'
 import { useCadStore } from '../document/store'
 import { engine } from '../engine/engine'
@@ -67,6 +67,14 @@ export function SketchCanvas() {
   const [projHover, setProjHover] = useState<number | null>(null)
   const [dimA, setDimA] = useState<PointId | null>(null)
   const [placing, setPlacing] = useState<{ a: PointId; b: PointId } | null>(null)
+  // Fillet/chamfer drag: the corner being sized and its (cyclic) neighbours.
+  const [cornerDrag, setCornerDrag] = useState<{
+    pid: PointId
+    corner: Vec2
+    prev: Vec2
+    next: Vec2
+    size: number
+  } | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   // Container aspect ratio (w/h). The viewBox is square, but the SVG fills a
@@ -269,6 +277,7 @@ export function SketchCanvas() {
         setLineDraft([])
         setDimA(null)
         setPlacing(null)
+        setCornerDrag(null)
         setEditing(null)
         st.getState().setTool(null)
       } else if (e.key === 'Enter') {
@@ -371,6 +380,16 @@ export function SketchCanvas() {
       return
     }
 
+    if (tool === 'fillet' || tool === 'chamfer') {
+      const hp = hitPoint(raw)
+      const nb = hp ? cornerNeighbors(data, hp) : null
+      if (hp && nb) {
+        setCornerDrag({ pid: hp, corner: pos(hp), prev: nb.prev, next: nb.next, size: 0 })
+        svgRef.current?.setPointerCapture(e.pointerId)
+      }
+      return
+    }
+
     // rectangle / circle: begin a drag
     setDrag({ start: snap, current: snap })
     svgRef.current?.setPointerCapture(e.pointerId)
@@ -386,13 +405,23 @@ export function SketchCanvas() {
       })
       return
     }
+    const rawMove = toModelRaw(e.clientX, e.clientY)
     const snap = toModel(e.clientX, e.clientY)
     setCursor(snap)
-    // Highlight an existing point the line/dimension tools would snap to.
-    setSnapPoint(
-      tool === 'line' || tool === 'dimension' ? hitPoint(toModelRaw(e.clientX, e.clientY)) : null,
-    )
-    setProjHover(tool === 'project' ? hitProjection(toModelRaw(e.clientX, e.clientY)) : null)
+    // Highlight the point a tool would act on: the line/dimension snap target, or
+    // the loop corner the fillet/chamfer tool would round/bevel.
+    let hover: PointId | null = null
+    if (tool === 'line' || tool === 'dimension') hover = hitPoint(rawMove)
+    else if (tool === 'fillet' || tool === 'chamfer') {
+      const hp = hitPoint(rawMove)
+      hover = hp && cornerNeighbors(data, hp) ? hp : null
+    }
+    setSnapPoint(hover)
+    setProjHover(tool === 'project' ? hitProjection(rawMove) : null)
+    if (cornerDrag) {
+      setCornerDrag({ ...cornerDrag, size: distance(cornerDrag.corner, rawMove) })
+      return
+    }
     if (moveRef.current) {
       st.getState().dragPoint(moveRef.current, snap[0], snap[1])
       return
@@ -404,6 +433,20 @@ export function SketchCanvas() {
     svgRef.current?.releasePointerCapture?.(e.pointerId)
     if (panRef.current) {
       panRef.current = null
+      return
+    }
+    if (cornerDrag) {
+      const { pid, corner, prev, next, size } = cornerDrag
+      const kind = tool === 'chamfer' ? 'chamfer' : 'fillet'
+      const max = maxCornerSize(prev, corner, next, kind)
+      if (max >= 0.1) {
+        // A tiny drag (≈ a click) still rounds, using a sensible default.
+        const minEdge = Math.min(distance(corner, prev), distance(corner, next))
+        const wanted = size < 0.5 ? Math.max(1, minEdge * 0.25) : size
+        st.getState().setCornerTreatment(pid, kind, Math.min(max, Math.max(0.1, wanted)))
+        st.getState().select([{ t: 'point', id: pid }])
+      }
+      setCornerDrag(null)
       return
     }
     if (moveRef.current) {
@@ -483,6 +526,15 @@ export function SketchCanvas() {
       : null
   const previewCircle =
     drag && tool === 'circle' ? { c: drag.start, r: distance(drag.start, drag.current) } : null
+
+  // Line tool: hovering near the first draft vertex (with ≥3 points placed) will
+  // close the loop on click — highlight it like a snap target so the closure is
+  // visible before committing (mirrors the close test in onPointerDown).
+  const closeLoopHover =
+    tool === 'line' &&
+    lineDraft.length >= 3 &&
+    cursor != null &&
+    distance(cursor, lineDraft[0].pos) <= CLOSE_DIST
 
   // dimension we're placing (follows cursor)
   const placePreview =
@@ -701,7 +753,7 @@ export function SketchCanvas() {
           ) : (
             <path
               key={s.id}
-              d={path(s.pts.map(pos))}
+              d={path(loopOutline(data, s))}
               fill={s.construction ? 'none' : 'rgba(110,168,254,0.16)'}
               stroke={s.construction ? '#ab9df2' : '#6ea8fe'}
               strokeWidth={1.6}
@@ -830,6 +882,19 @@ export function SketchCanvas() {
           />
         )}
 
+        {/* Close-the-loop highlight: same snap ring on the first draft vertex. */}
+        {closeLoopHover && (
+          <circle
+            cx={lineDraft[0].pos[0]}
+            cy={-lineDraft[0].pos[1]}
+            r={vertexR * 2.4}
+            fill="none"
+            stroke="#7bd88f"
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+
         {placePreview &&
           renderDim(
             placePreview.a,
@@ -867,6 +932,28 @@ export function SketchCanvas() {
             vectorEffect="non-scaling-stroke"
           />
         )}
+        {cornerDrag &&
+          (() => {
+            const kind = tool === 'chamfer' ? 'chamfer' : 'fillet'
+            const pts = cornerPoints(
+              cornerDrag.prev,
+              cornerDrag.corner,
+              cornerDrag.next,
+              kind,
+              cornerDrag.size,
+            )
+            if (pts.length < 2) return null
+            return (
+              <polyline
+                points={pts.map(([x, y]) => pt(x, y)).join(' ')}
+                fill="none"
+                stroke="#ffd866"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })()}
       </svg>
 
       {editing && editPos && (

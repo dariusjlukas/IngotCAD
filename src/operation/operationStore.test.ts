@@ -170,6 +170,53 @@ describe('operation store', () => {
     expect(roots).toContain(box)
   })
 
+  it('flipping into the source body auto-switches union ↔ subtract', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    expect(op().pending?.combine).toBe('union')
+    op().toggleFlip()
+    expect(op().pending?.flip).toBe(true)
+    expect(op().pending?.combine).toBe('subtract')
+    op().toggleFlip()
+    expect(op().pending?.flip).toBe(false)
+    expect(op().pending?.combine).toBe('union')
+  })
+
+  it('dragging the handle into the body (negative extent) auto-subtracts', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    op().setSignedValue(-7)
+    expect(op().pending?.flip).toBe(true)
+    expect(op().pending?.combine).toBe('subtract')
+    op().setSignedValue(4)
+    expect(op().pending?.flip).toBe(false)
+    expect(op().pending?.combine).toBe('union')
+  })
+
+  it('an explicit combine choice stops auto-tracking the flip', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    op().setCombine('new')
+    op().toggleFlip() // extruding into the body, but the user chose 'new'
+    expect(op().pending?.flip).toBe(true)
+    expect(op().pending?.combine).toBe('new')
+  })
+
+  it('flip does not introduce a combine mode without a source object', () => {
+    op().start({
+      mode: 'extrude',
+      profile: SQUARE,
+      transform: IDENTITY_TRANSFORM,
+      segments: 64,
+      value: 5,
+      flip: false,
+      sketch: SRC,
+    })
+    expect(op().pending?.combine).toBe('new')
+    op().toggleFlip()
+    expect(op().pending?.combine).toBe('new')
+  })
+
   it('a cardinal-plane sketch has no source object and defaults to new', () => {
     op().start({
       mode: 'extrude',

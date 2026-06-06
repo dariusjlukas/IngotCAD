@@ -7,13 +7,17 @@ import type { ReactNode } from 'react'
 import { useSketchStore } from './sketchStore'
 import type { Ref, SketchTool } from './sketchStore'
 import type { ConstraintInput, PointId } from './model'
-import { constraintLabel } from './model'
+import { constraintLabel, cornerNeighbors } from './model'
+import { distance, maxCornerSize } from './geometry'
+import type { Vec2 } from '../document/types'
 import { NumberField } from '../ui/NumberField'
 
 const DRAW_TOOLS: { id: SketchTool; label: string }[] = [
   { id: 'line', label: 'Line' },
   { id: 'rectangle', label: 'Rectangle' },
   { id: 'circle', label: 'Circle' },
+  { id: 'fillet', label: 'Fillet' },
+  { id: 'chamfer', label: 'Chamfer' },
   { id: 'dimension', label: 'Dimension' },
   { id: 'project', label: 'Project' },
 ]
@@ -23,6 +27,8 @@ const TOOL_HINT: Record<string, string> = {
   line: 'Click to add points; click the first point or double-click to close.',
   rectangle: 'Drag to draw a rectangle (it stays rectangular).',
   circle: 'Drag from the center to set the radius.',
+  fillet: 'Drag from a loop corner to round it; fine-tune the radius in Properties.',
+  chamfer: 'Drag from a loop corner to bevel it; fine-tune the setback in Properties.',
   dimension: 'Click two points (or a segment); move to place, click, then type a value.',
   project:
     'Click a section outline (the gray in-plane cross-section of the scene) to include it as anchored sketch geometry.',
@@ -293,10 +299,34 @@ export function SketchProperties() {
   const setCircleRadius = useSketchStore((s) => s.setCircleRadius)
   const setPointPos = useSketchStore((s) => s.setPointPos)
   const togglePointFixed = useSketchStore((s) => s.togglePointFixed)
+  const setCornerTreatment = useSketchStore((s) => s.setCornerTreatment)
+  const removeCornerTreatment = useSketchStore((s) => s.removeCornerTreatment)
   const select = useSketchStore((s) => s.select)
   const deleteSelection = useSketchStore((s) => s.deleteSelection)
 
   const single = selection.length === 1 ? selection[0] : null
+
+  // When a single loop-corner point is selected, expose its fillet/chamfer.
+  const cornerInfo = (() => {
+    if (!single || single.t !== 'point') return null
+    const nb = cornerNeighbors(data, single.id)
+    const p = data.points[single.id]
+    if (!nb || !p) return null
+    const loop = data.shapes.find((s) => s.kind === 'loop' && s.pts.includes(single.id))
+    const treatment = loop && loop.kind === 'loop' ? loop.corners?.[single.id] : undefined
+    return { pid: single.id, prev: nb.prev, next: nb.next, corner: [p.x, p.y] as Vec2, treatment }
+  })()
+
+  // A sensible starting size when turning a plain corner into a fillet/chamfer.
+  const cornerDefault = (kind: 'fillet' | 'chamfer'): number => {
+    if (!cornerInfo) return 1
+    const max = maxCornerSize(cornerInfo.prev, cornerInfo.corner, cornerInfo.next, kind)
+    const minEdge = Math.min(
+      distance(cornerInfo.corner, cornerInfo.prev),
+      distance(cornerInfo.corner, cornerInfo.next),
+    )
+    return Math.min(max, Math.max(1, minEdge * 0.25))
+  }
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-l border-line bg-panel">
@@ -354,6 +384,57 @@ export function SketchProperties() {
             >
               {data.points[single.id].fixed ? 'Unfix point' : 'Fix point (anchor)'}
             </button>
+          </div>
+        )}
+
+        {cornerInfo && (
+          <div>
+            <div className="mb-1 text-xs uppercase tracking-wide text-fg-faint">Corner</div>
+            <div className="mb-2 flex overflow-hidden rounded border border-line-strong">
+              {(['none', 'fillet', 'chamfer'] as const).map((k) => {
+                const active = (cornerInfo.treatment?.kind ?? 'none') === k
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() =>
+                      k === 'none'
+                        ? removeCornerTreatment(cornerInfo.pid)
+                        : setCornerTreatment(
+                            cornerInfo.pid,
+                            k,
+                            cornerInfo.treatment?.size ?? cornerDefault(k),
+                          )
+                    }
+                    className={
+                      'flex-1 px-2 py-1 text-xs capitalize ' +
+                      (active ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-elevated')
+                    }
+                  >
+                    {k}
+                  </button>
+                )
+              })}
+            </div>
+            {cornerInfo.treatment &&
+              (() => {
+                const t = cornerInfo.treatment
+                const max = maxCornerSize(cornerInfo.prev, cornerInfo.corner, cornerInfo.next, t.kind)
+                return (
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-fg-faint">
+                      {t.kind === 'fillet' ? 'Radius (mm)' : 'Setback (mm)'}
+                    </span>
+                    <div className="w-20">
+                      <NumberField
+                        value={t.size}
+                        min={0.1}
+                        onCommit={(v) => setCornerTreatment(cornerInfo.pid, t.kind, Math.min(max, v))}
+                      />
+                    </div>
+                  </label>
+                )
+              })()}
           </div>
         )}
 
