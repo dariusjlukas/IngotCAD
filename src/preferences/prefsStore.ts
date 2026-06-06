@@ -38,8 +38,8 @@ export const usePrefsStore = create<PrefsState>()(
     (set) => ({
       theme: 'system',
       gridEnabled: true,
-      smoothShading: false,
-      projection: 'perspective',
+      smoothShading: true,
+      projection: 'orthographic',
       setTheme: (theme) => set({ theme }),
       setGridEnabled: (gridEnabled) => set({ gridEnabled }),
       setSmoothShading: (smoothShading) => set({ smoothShading }),

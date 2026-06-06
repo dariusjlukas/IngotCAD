@@ -48,6 +48,8 @@ interface SketchState {
   planeLabel: string
   /** When set, committing updates this existing node's sketch instead of creating one. */
   editingNodeId: NodeId | null
+  /** The object whose face the plane was picked from (null for cardinal/datum planes). */
+  sourceNodeId: NodeId | null
   tool: SketchTool | null
   data: SketchData
   selection: Ref[]
@@ -62,7 +64,8 @@ interface SketchState {
   /** Re-open the sketch of an existing extrusion/revolution node for editing. */
   editSketch: (nodeId: NodeId) => void
   chooseCardinal: (kind: PlaneKind) => void
-  chooseFace: (point: Vec3, normal: Vec3) => void
+  /** `sourceNodeId` is the picked object, enabling union/subtract on commit. */
+  chooseFace: (point: Vec3, normal: Vec3, sourceNodeId?: NodeId) => void
   /** Start sketching on an already-resolved construction plane. */
   chooseConstructionPlane: (plane: SketchPlane, label: string) => void
   cancel: () => void
@@ -111,6 +114,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
     plane: null,
     planeLabel: '',
     editingNodeId: null,
+    sourceNodeId: null,
     tool: 'line',
     data: emptySketch(),
     selection: [],
@@ -125,6 +129,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
         plane: null,
         planeLabel: '',
         editingNodeId: null,
+        sourceNodeId: null,
         data: emptySketch(),
         selection: [],
         tool: 'line',
@@ -141,6 +146,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
         active: true,
         choosing: false,
         editingNodeId: nodeId,
+        sourceNodeId: null,
         plane: p.sketch.plane,
         planeLabel: 'Edit',
         data: cloneData(p.sketch.data),
@@ -158,22 +164,25 @@ export const useSketchStore = create<SketchState>((set, get) => {
         planeLabel: CARDINAL_LABEL[kind],
         choosing: false,
         active: true,
+        sourceNodeId: null,
       }),
-    chooseFace: (point, normal) =>
+    chooseFace: (point, normal, sourceNodeId) =>
       set({
         plane: planeFromFace(point, normal),
         planeLabel: 'Face',
         choosing: false,
         active: true,
+        sourceNodeId: sourceNodeId ?? null,
       }),
     chooseConstructionPlane: (plane, label) =>
-      set({ plane, planeLabel: label, choosing: false, active: true }),
+      set({ plane, planeLabel: label, choosing: false, active: true, sourceNodeId: null }),
     cancel: () =>
       set({
         active: false,
         choosing: false,
         plane: null,
         editingNodeId: null,
+        sourceNodeId: null,
         data: emptySketch(),
         selection: [],
       }),
@@ -398,6 +407,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
           choosing: false,
           plane: null,
           editingNodeId: null,
+          sourceNodeId: null,
           data: emptySketch(),
           selection: [],
         })
@@ -405,7 +415,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
       }
 
       // New solid: profile is used as-drawn (plane-local); the node transform is
-      // the plane frame. Hand off to the live extrude/revolve preview.
+      // the plane frame. Hand off to the live extrude/revolve preview, carrying
+      // the source object (if any) so the user can union/subtract on confirm.
       const op = useOperationStore.getState()
       const transform = planeToTransform(plane)
       if (s.outputMode === 'revolve') {
@@ -417,6 +428,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
           value: 360,
           flip: false,
           sketch: source,
+          sourceNodeId: s.sourceNodeId,
         })
       } else {
         op.start({
@@ -427,6 +439,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
           value: 10,
           flip: false,
           sketch: source,
+          sourceNodeId: s.sourceNodeId,
         })
       }
       set({
@@ -434,6 +447,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
         choosing: false,
         plane: null,
         editingNodeId: null,
+        sourceNodeId: null,
         data: emptySketch(),
         selection: [],
       })

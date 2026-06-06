@@ -1,15 +1,27 @@
 /** Panel shown over the viewport while a pending extrude/revolve awaits confirmation. */
 import { useEffect } from 'react'
-import { useOperationStore } from './operationStore'
+import { useOperationStore, type CombineMode } from './operationStore'
+import { useCadStore } from '../document/store'
 import { NumberField } from '../ui/NumberField'
+
+const COMBINE_OPTIONS: { mode: CombineMode; label: string }[] = [
+  { mode: 'new', label: 'New' },
+  { mode: 'union', label: 'Union' },
+  { mode: 'subtract', label: 'Subtract' },
+]
 
 export function OperationConfirm() {
   const pending = useOperationStore((s) => s.pending)
   const setValue = useOperationStore((s) => s.setValue)
   const setSignedValue = useOperationStore((s) => s.setSignedValue)
   const toggleFlip = useOperationStore((s) => s.toggleFlip)
+  const setCombine = useOperationStore((s) => s.setCombine)
   const confirm = useOperationStore((s) => s.confirm)
   const cancel = useOperationStore((s) => s.cancel)
+  const targetName = useCadStore((s) => {
+    const sid = pending?.sourceNodeId
+    return sid ? (s.doc.nodes[sid]?.name ?? null) : null
+  })
 
   useEffect(() => {
     if (!pending) return
@@ -73,6 +85,33 @@ export function OperationConfirm() {
         >
           Flip
         </button>
+      )}
+      {pending.sourceNodeId && (
+        <div className="flex items-center gap-1">
+          <span className="text-sm text-fg-muted">Result</span>
+          <div className="flex items-center gap-0.5 rounded bg-elevated/60 p-0.5">
+            {COMBINE_OPTIONS.map(({ mode, label }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setCombine(mode)}
+                title={
+                  mode === 'new'
+                    ? 'Create a separate new object'
+                    : `${mode === 'union' ? 'Add to' : 'Cut from'} ${targetName ?? 'the source object'}`
+                }
+                className={
+                  'rounded px-2.5 py-1 text-sm ' +
+                  (pending.combine === mode
+                    ? 'bg-accent text-on-accent'
+                    : 'text-fg hover:bg-elevated')
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       <span className="hidden text-xs text-fg-faint sm:inline">
         drag the arrow, or use the slider

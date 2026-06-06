@@ -5,8 +5,9 @@ right in the browser — no install, no account, no paywall — with primitive
 shapes and boolean operations, then export a **watertight, print-ready** STL or
 3MF. It runs entirely client-side.
 
-> Status: MVP. Direct/CSG modeling (TinkerCAD-style), not parametric
-> sketch/feature CAD. A desktop (offline) build is planned for later.
+> Status: MVP
+> A desktop (offline) build is planned for later.
+> Live demo: [https://dariusjlukas.github.io/IngotCAD/](https://dariusjlukas.github.io/IngotCAD/)
 
 ## Why
 

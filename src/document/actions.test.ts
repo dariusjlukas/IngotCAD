@@ -117,3 +117,44 @@ describe('document actions', () => {
     expect(store().doc.nodes[id].transform).toEqual(original)
   })
 })
+
+describe('setNodeTransform (scale baking)', () => {
+  it('bakes a box scale into its size and resets the scale, in one undo step', () => {
+    const id = store().addPrimitive('box') // default size [20, 20, 20]
+    const t = store().doc.nodes[id].transform
+    store().setNodeTransform(id, { ...t, scale: [2, 1, 1] })
+
+    const node = store().doc.nodes[id]
+    expect(node.kind === 'primitive' && node.params.type === 'box' && node.params.size).toEqual([
+      40, 20, 20,
+    ])
+    expect(node.transform.scale).toEqual([1, 1, 1])
+
+    store().undo()
+    const reverted = store().doc.nodes[id]
+    expect(
+      reverted.kind === 'primitive' && reverted.params.type === 'box' && reverted.params.size,
+    ).toEqual([20, 20, 20])
+  })
+
+  it('keeps a non-uniform scale on a sphere (not representable as a radius)', () => {
+    const id = store().addPrimitive('sphere') // default radius 12
+    const t = store().doc.nodes[id].transform
+    store().setNodeTransform(id, { ...t, scale: [2, 2, 1] })
+
+    const node = store().doc.nodes[id]
+    expect(node.kind === 'primitive' && node.params.type === 'sphere' && node.params.radius).toBe(
+      12,
+    )
+    expect(node.transform.scale).toEqual([2, 2, 1])
+  })
+
+  it('leaves a group/container scale untouched (no params to bake into)', () => {
+    const a = store().addPrimitive('box')
+    const b = store().addPrimitive('box')
+    const g = store().group([a, b])!
+    const t = store().doc.nodes[g].transform
+    store().setNodeTransform(g, { ...t, scale: [2, 2, 2] })
+    expect(store().doc.nodes[g].transform.scale).toEqual([2, 2, 2])
+  })
+})

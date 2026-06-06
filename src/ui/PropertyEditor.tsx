@@ -1,7 +1,8 @@
 /** Edits the selected node: name, color, transform, shape params, and role. */
 import type { ReactNode } from 'react'
-import { useCadStore } from '../document/store'
+import { useCadStore, worldScale } from '../document/store'
 import { useSketchStore } from '../sketch/sketchStore'
+import { primitiveLocalDimensions } from '../document/scaleBake'
 import type { PlaneDefinition, PrimitiveNode, PrimitiveParams } from '../document/types'
 import { NumberField, Vec3Field } from './NumberField'
 
@@ -10,6 +11,16 @@ const PLANE_KIND_LABEL: Record<PlaneDefinition['kind'], string> = {
   face: 'Offset from a face',
   threePoints: 'Through three points',
   edgeAngle: 'Angle about an edge',
+}
+
+/** True when a scale axis meaningfully differs from 1. */
+function scaled(x: number): boolean {
+  return Math.abs(x - 1) > 1e-4
+}
+
+/** Trim to at most 2 decimals without trailing zeros (e.g. 20, 20.5, 19.99). */
+function fmtMm(n: number): string {
+  return String(Number(n.toFixed(2)))
 }
 
 function EditSketchButton({ nodeId }: { nodeId: string }) {
@@ -60,6 +71,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
           value={params.size}
           min={0.1}
           step={1}
+          live
           onCommit={(size) => update({ ...params, size })}
         />
       )
@@ -70,6 +82,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
             <NumberField
               value={params.height}
               min={0.1}
+              live
               onCommit={(height) => update({ ...params, height })}
             />
           </Field>
@@ -77,6 +90,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
             <NumberField
               value={params.radiusBottom}
               min={0}
+              live
               onCommit={(radiusBottom) => update({ ...params, radiusBottom })}
             />
           </Field>
@@ -84,6 +98,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
             <NumberField
               value={params.radiusTop}
               min={0}
+              live
               onCommit={(radiusTop) => update({ ...params, radiusTop })}
             />
           </Field>
@@ -92,6 +107,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
               value={params.segments}
               min={3}
               step={1}
+              live
               onCommit={(segments) => update({ ...params, segments: Math.round(segments) })}
             />
           </Field>
@@ -104,6 +120,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
             <NumberField
               value={params.radius}
               min={0.1}
+              live
               onCommit={(radius) => update({ ...params, radius })}
             />
           </Field>
@@ -112,6 +129,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
               value={params.segments}
               min={4}
               step={1}
+              live
               onCommit={(segments) => update({ ...params, segments: Math.round(segments) })}
             />
           </Field>
@@ -124,6 +142,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
             <NumberField
               value={params.height}
               min={0.1}
+              live
               onCommit={(height) => update({ ...params, height })}
             />
           </Field>
@@ -144,6 +163,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
             <NumberField
               value={params.degrees}
               min={1}
+              live
               onCommit={(degrees) => update({ ...params, degrees: Math.min(360, degrees) })}
             />
           </Field>
@@ -152,6 +172,7 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
               value={params.segments}
               min={3}
               step={1}
+              live
               onCommit={(segments) => update({ ...params, segments: Math.round(segments) })}
             />
           </Field>
@@ -215,6 +236,7 @@ function PlaneEditor({ width, planeId }: { width: number; planeId: string }) {
               <NumberField
                 value={def.distance}
                 step={1}
+                live
                 onCommit={(distance) => setPlaneDefinition(planeId, { ...def, distance })}
               />
             </Field>
@@ -226,6 +248,7 @@ function PlaneEditor({ width, planeId }: { width: number; planeId: string }) {
             <NumberField
               value={def.distance}
               step={1}
+              live
               onCommit={(distance) => setPlaneDefinition(planeId, { ...def, distance })}
             />
           </Field>
@@ -236,6 +259,7 @@ function PlaneEditor({ width, planeId }: { width: number; planeId: string }) {
             <NumberField
               value={def.angleDeg}
               step={5}
+              live
               onCommit={(angleDeg) => setPlaneDefinition(planeId, { ...def, angleDeg })}
             />
           </Field>
@@ -272,8 +296,9 @@ export function PropertyEditor({ width }: { width: number }) {
   const node = useCadStore((s) => (id ? s.doc.nodes[id] : null))
   const isChild = useCadStore((s) => (id ? !s.doc.rootIds.includes(id) : false))
   const selectedCount = useCadStore((s) => s.selectedIds.length)
+  const doc = useCadStore((s) => s.doc)
 
-  const transformNode = useCadStore((s) => s.transformNode)
+  const setNodeTransform = useCadStore((s) => s.setNodeTransform)
   const setNodeName = useCadStore((s) => s.setNodeName)
   const setNodeColor = useCadStore((s) => s.setNodeColor)
   const setRole = useCadStore((s) => s.setRole)
@@ -293,6 +318,21 @@ export function PropertyEditor({ width }: { width: number }) {
   }
 
   const t = node.transform
+
+  // Scaling a leaf primitive bakes into its params, so its own scale is normally
+  // identity — hide the redundant Scale field unless a residual scale remains
+  // (non-uniform sphere/cylinder, or a legacy doc not yet normalized).
+  const showScale = node.kind !== 'primitive' || t.scale.some(scaled)
+
+  // "Effective size": the primitive's printed dimensions once accumulated world
+  // scale (its own residual + any inherited group scale) is applied. Only shown
+  // when scale actually changes the size, so it doesn't duplicate the Size field.
+  const ws = worldScale(doc, id)
+  const localDims = node.kind === 'primitive' ? primitiveLocalDimensions(node.params) : null
+  const effectiveDims =
+    localDims && ws.some(scaled)
+      ? ([localDims[0] * ws[0], localDims[1] * ws[1], localDims[2] * ws[2]] as const)
+      : null
 
   return (
     <PropertyShell width={width}>
@@ -339,21 +379,35 @@ export function PropertyEditor({ width }: { width: number }) {
           label="Position (mm)"
           value={t.position}
           step={1}
-          onCommit={(position) => transformNode(id, { ...t, position })}
+          live
+          onCommit={(position) => setNodeTransform(id, { ...t, position })}
         />
         <Vec3Field
           label="Rotation (°)"
           value={t.rotationDeg}
           step={5}
-          onCommit={(rotationDeg) => transformNode(id, { ...t, rotationDeg })}
+          live
+          onCommit={(rotationDeg) => setNodeTransform(id, { ...t, rotationDeg })}
         />
-        <Vec3Field
-          label="Scale"
-          value={t.scale}
-          step={0.1}
-          min={0.01}
-          onCommit={(scale) => transformNode(id, { ...t, scale })}
-        />
+        {showScale && (
+          <Vec3Field
+            label="Scale"
+            value={t.scale}
+            step={0.1}
+            min={0.01}
+            live
+            onCommit={(scale) => setNodeTransform(id, { ...t, scale })}
+          />
+        )}
+
+        {effectiveDims && (
+          <div className="flex items-center justify-between text-xs text-fg-faint">
+            <span>Effective size</span>
+            <span className="text-fg-muted">
+              {fmtMm(effectiveDims[0])} × {fmtMm(effectiveDims[1])} × {fmtMm(effectiveDims[2])} mm
+            </span>
+          </div>
+        )}
 
         {node.kind === 'primitive' && (
           <div className="border-t border-line pt-3">

@@ -23,9 +23,11 @@ import type {
   SketchSource,
   Transform,
   Vec2,
+  Vec3,
 } from './types'
 import { createEmptyDocument, hasChildren, IDENTITY_TRANSFORM } from './types'
 import { transformToMatrix4, matrix4ToTransform } from '../geometry/transform'
+import { bakeScaleIntoParams } from './scaleBake'
 import { cleanContours } from '../sketch/geometry'
 
 const HISTORY_LIMIT = 100
@@ -155,6 +157,55 @@ function topLevelOf(doc: CadDocument, ids: NodeId[]): NodeId[] {
   })
 }
 
+/** Default name base for a boolean of the given operation. */
+function combineLabel(op: BooleanOp): string {
+  return op === 'union' ? 'Union' : op === 'subtract' ? 'Difference' : 'Intersection'
+}
+
+/** How a freshly-created sketch solid folds into an existing object. */
+export interface CombineTarget {
+  /** A node whose root ancestor the new solid is combined with. */
+  targetId: NodeId
+  op: 'union' | 'subtract'
+}
+
+/**
+ * Fold a just-created root solid `newId` into the root containing `targetId`,
+ * replacing both roots with a boolean of the two (mutating the immer draft).
+ * Child order is [target, new] so `subtract` cuts the new solid out of the
+ * target. Returns the boolean's id, or null if the target root is gone or is
+ * the new solid itself (in which case the caller keeps the standalone solid).
+ */
+function wrapInBoolean(
+  doc: CadDocument,
+  targetId: NodeId,
+  newId: NodeId,
+  op: BooleanOp,
+  name: string,
+  color: string,
+): NodeId | null {
+  const targetRoot = rootOf(doc, targetId)
+  if (targetRoot === newId || !doc.rootIds.includes(targetRoot) || !doc.rootIds.includes(newId))
+    return null
+  const bid = nanoid()
+  const firstIdx = doc.rootIds.indexOf(targetRoot)
+  doc.nodes[bid] = {
+    id: bid,
+    kind: 'boolean',
+    op,
+    name,
+    childIds: [targetRoot, newId],
+    color,
+    visible: true,
+    role: 'solid',
+    transform: { ...IDENTITY_TRANSFORM },
+  }
+  doc.rootIds = doc.rootIds.filter((rid) => rid !== targetRoot && rid !== newId)
+  doc.rootIds.splice(firstIdx, 0, bid)
+  doc.featureOrder.push(bid)
+  return bid
+}
+
 /** World transform of `id` = composition of its ancestor transforms (root→node). */
 function worldTransform(doc: CadDocument, id: NodeId): Transform {
   const chain: Transform[] = []
@@ -166,6 +217,11 @@ function worldTransform(doc: CadDocument, id: NodeId): Transform {
     cur = parentNodeId(doc, cur)
   }
   return chain.reduce((acc, t) => composeTransforms(acc, t), IDENTITY_TRANSFORM)
+}
+
+/** Accumulated world scale of `id` (product of its own + ancestor scales). */
+export function worldScale(doc: CadDocument, id: NodeId): Vec3 {
+  return worldTransform(doc, id).scale
 }
 
 /** The local transform `id` needs under `destParentId` to keep its world pose. */
@@ -243,6 +299,7 @@ export interface CadState {
     transform: Transform,
     flip?: boolean,
     sketch?: SketchSource,
+    combine?: CombineTarget,
   ) => NodeId | null
   addRevolution: (
     profile: Vec2[][],
@@ -250,6 +307,7 @@ export interface CadState {
     segments: number,
     transform: Transform,
     sketch?: SketchSource,
+    combine?: CombineTarget,
   ) => NodeId | null
   addMeshAsset: (name: string, position: Float32Array, index: Uint32Array) => NodeId
   group: (ids: NodeId[]) => NodeId | null
@@ -271,6 +329,14 @@ export interface CadState {
 
   // node edits
   transformNode: (id: NodeId, transform: Transform) => void
+  /**
+   * Like `transformNode`, but for a leaf primitive it folds a bakeable scale
+   * into the primitive's params (resetting the scale to identity) so the
+   * parametric dimensions stay the source of truth. Use this for user-driven
+   * transform edits (gizmo, property editor); use `transformNode` for internal
+   * world-pose-preserving moves that must keep the raw scale.
+   */
+  setNodeTransform: (id: NodeId, transform: Transform) => void
   setNodeParams: (id: NodeId, params: PrimitiveParams) => void
   setRole: (id: NodeId, role: Role) => void
   setNodeName: (id: NodeId, name: string) => void
@@ -286,17 +352,43 @@ export interface CadState {
   /** Mark the document as saved (clears the dirty flag). */
   markSaved: () => void
 
+  // live editing — coalesce a scrub gesture (e.g. mouse-wheel on a property
+  // field) into a single undo step. Bracket the gesture with these; the
+  // mutations in between collapse to one history entry.
+  /** Start a live-edit gesture: subsequent mutations coalesce into one undo step. */
+  beginLiveEdit: () => void
+  /** End a live-edit gesture started with beginLiveEdit. */
+  endLiveEdit: () => void
+
   // history
   undo: () => void
   redo: () => void
 }
 
 export const useCadStore = create<CadState>()((set, get) => {
+  // Live-edit gesture state (transient; not part of the document or history).
+  // While a gesture is active (e.g. scrubbing a property field with the mouse
+  // wheel), every mutation coalesces into a single undo step: the pre-edit doc
+  // is snapshotted onto `past` once, then the working doc is replaced in place.
+  let liveActive = false
+  let liveBaselinePushed = false
+
   /** Apply an immer recipe to the document and record an undo step. */
   const mutate = (recipe: (doc: CadDocument) => void) => {
     set((state) => {
       const doc = produce(state.doc, recipe)
       if (doc === state.doc) return {}
+      if (liveActive) {
+        // First change of the gesture snapshots history; the rest don't grow it.
+        if (liveBaselinePushed) return { doc, future: [], dirty: true }
+        liveBaselinePushed = true
+        return {
+          doc,
+          past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
+          future: [],
+          dirty: true,
+        }
+      }
       return {
         doc,
         past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
@@ -304,6 +396,16 @@ export const useCadStore = create<CadState>()((set, get) => {
         dirty: true,
       }
     })
+  }
+
+  const beginLiveEdit = () => {
+    if (liveActive) return
+    liveActive = true
+    liveBaselinePushed = false
+  }
+  const endLiveEdit = () => {
+    liveActive = false
+    liveBaselinePushed = false
   }
 
   const nextName = (base: string): string => {
@@ -420,16 +522,21 @@ export const useCadStore = create<CadState>()((set, get) => {
       return id
     },
 
-    addExtrusion: (profile, height, transform, flip = false, sketch) => {
+    addExtrusion: (profile, height, transform, flip = false, sketch, combine) => {
       // The profile arrives recentered in plane-local space; `transform` places
       // that plane in the world (and applies the in-plane offset). The extrusion
       // grows along the plane normal (engine builds it 0..height on +local-Z, or
-      // -Z when flipped).
+      // -Z when flipped). When `combine` is set (the sketch was drawn on an
+      // existing object's face) the new solid is folded into that object via a
+      // boolean — all in one undo step.
       const contours = cleanContours(profile)
       if (contours.length === 0 || height <= 0) return null
       const id = nanoid()
       const name = nextName(TYPE_LABEL.extrusion)
       const color = PALETTE[get().counter % PALETTE.length]
+      const boolName = combine ? nextName(combineLabel(combine.op)) : ''
+      const boolColor = combine ? PALETTE[get().counter % PALETTE.length] : color
+      let resultId: NodeId = id
       mutate((doc) => {
         doc.nodes[id] = {
           id,
@@ -443,17 +550,24 @@ export const useCadStore = create<CadState>()((set, get) => {
         }
         doc.rootIds.push(id)
         doc.featureOrder.push(id)
+        if (combine) {
+          const bid = wrapInBoolean(doc, combine.targetId, id, combine.op, boolName, boolColor)
+          if (bid) resultId = bid
+        }
       })
-      get().select([id])
-      return id
+      get().select([resultId])
+      return resultId
     },
 
-    addRevolution: (profile, degrees, segments, transform, sketch) => {
+    addRevolution: (profile, degrees, segments, transform, sketch, combine) => {
       const contours = cleanContours(profile)
       if (contours.length === 0 || degrees <= 0) return null
       const id = nanoid()
       const name = nextName(TYPE_LABEL.revolution)
       const color = PALETTE[get().counter % PALETTE.length]
+      const boolName = combine ? nextName(combineLabel(combine.op)) : ''
+      const boolColor = combine ? PALETTE[get().counter % PALETTE.length] : color
+      let resultId: NodeId = id
       mutate((doc) => {
         doc.nodes[id] = {
           id,
@@ -467,9 +581,13 @@ export const useCadStore = create<CadState>()((set, get) => {
         }
         doc.rootIds.push(id)
         doc.featureOrder.push(id)
+        if (combine) {
+          const bid = wrapInBoolean(doc, combine.targetId, id, combine.op, boolName, boolColor)
+          if (bid) resultId = bid
+        }
       })
-      get().select([id])
-      return id
+      get().select([resultId])
+      return resultId
     },
 
     addMeshAsset: (name, position, index) => {
@@ -516,8 +634,7 @@ export const useCadStore = create<CadState>()((set, get) => {
     },
 
     applyBoolean: (ids, op) => {
-      const labelBase = op === 'union' ? 'Union' : op === 'subtract' ? 'Difference' : 'Intersection'
-      const name = nextName(labelBase)
+      const name = nextName(combineLabel(op))
       const color = PALETTE[get().counter % PALETTE.length]
       return makeContainer(
         ids,
@@ -716,6 +833,21 @@ export const useCadStore = create<CadState>()((set, get) => {
         if (node) node.transform = transform
       }),
 
+    setNodeTransform: (id, transform) =>
+      mutate((doc) => {
+        const node = doc.nodes[id]
+        if (!node) return
+        if (node.kind === 'primitive') {
+          const baked = bakeScaleIntoParams(node.params, transform.scale)
+          if (baked) {
+            node.params = baked.params
+            node.transform = { ...transform, scale: baked.residualScale }
+            return
+          }
+        }
+        node.transform = transform
+      }),
+
     setNodeParams: (id, params) =>
       mutate((doc) => {
         const node = doc.nodes[id]
@@ -782,6 +914,9 @@ export const useCadStore = create<CadState>()((set, get) => {
       }),
     setDocumentName: (documentName) => set({ documentName }),
     markSaved: () => set({ dirty: false }),
+
+    beginLiveEdit,
+    endLiveEdit,
 
     undo: () =>
       set((state) => {

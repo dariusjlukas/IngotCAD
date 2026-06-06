@@ -12,6 +12,7 @@ import { CadScene } from './CadScene'
 import { ConstructionPlanes } from './ConstructionPlanes'
 import { CameraController } from './CameraController'
 import { CameraRig } from './CameraRig'
+import { SketchCameraLock } from './SketchCameraLock'
 import { frameAll } from './meshRegistry'
 import { OperationPreview } from '../operation/OperationPreview'
 import { useCadStore } from '../document/store'
@@ -88,6 +89,11 @@ export function Viewport() {
   const resetView = useViewportStore((s) => s.resetView)
   const theme = VIEWPORT_THEMES[useResolvedTheme()]
   const gridEnabled = usePrefsStore((s) => s.gridEnabled)
+  // During a sketch (and its fly-in/out) the camera is locked toward the sketch
+  // plane and the SVG draws its own plane-local grid, so hide the world
+  // build-plate grid (it would double up / sit edge-on for a non-XY plane) and
+  // the orientation cube for the whole transition.
+  const inSketchView = useViewportStore((s) => s.sketchCamPhase) !== 'idle'
 
   const onViewportContextMenu = (e: React.MouseEvent) => {
     // Object right-clicks are handled by the meshes; bail if one just did, or if
@@ -145,7 +151,7 @@ export function Viewport() {
         <directionalLight position={[-180, 160, 120]} intensity={theme.fillIntensity} />
         <ambientLight intensity={theme.ambientIntensity} />
 
-        {gridEnabled && (
+        {gridEnabled && !inSketchView && (
           <BuildPlateGrid cellColor={theme.gridMinor} sectionColor={theme.gridMajor} />
         )}
 
@@ -155,16 +161,26 @@ export function Viewport() {
 
         <CameraRig />
         <CameraController />
+        <SketchCameraLock />
         <OrbitControls
           makeDefault
           enableDamping
           dampingFactor={0.12}
           minDistance={5}
           maxDistance={4000}
+          // Middle-drag pans (instead of the default dolly/zoom); right-drag also
+          // pans, which the context-menu guard relies on. Wheel still zooms.
+          mouseButtons={{
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.PAN,
+            RIGHT: THREE.MOUSE.PAN,
+          }}
         />
-        <GizmoHelper alignment="bottom-right" margin={[72, 72]}>
-          <GizmoViewport axisColors={['#ff6188', '#7bd88f', '#6ea8fe']} labelColor="#ffffff" />
-        </GizmoHelper>
+        {!inSketchView && (
+          <GizmoHelper alignment="bottom-right" margin={[72, 72]}>
+            <GizmoViewport axisColors={['#ff6188', '#7bd88f', '#6ea8fe']} labelColor="#ffffff" />
+          </GizmoHelper>
+        )}
       </Canvas>
 
       <button

@@ -24,8 +24,9 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     ],
   },
   {
-    title: 'Transform',
+    title: 'Tools',
     items: [
+      ['Q', 'Select'],
       ['W', 'Move'],
       ['E', 'Rotate'],
       ['R', 'Scale'],

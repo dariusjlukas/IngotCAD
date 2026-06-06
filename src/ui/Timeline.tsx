@@ -6,7 +6,9 @@
  */
 import { useCadStore } from '../document/store'
 import { useSketchStore } from '../sketch/sketchStore'
-import type { CadNode } from '../document/types'
+import type { CadNode, NodeId } from '../document/types'
+import { objectMenuEntries } from './objectMenu'
+import { openContextMenu, type ContextMenuEntry } from './contextMenuStore'
 
 function isEditableSketch(n: CadNode): boolean {
   return (
@@ -25,6 +27,21 @@ export function Timeline() {
 
   const features = featureOrder.filter((id) => nodes[id])
 
+  const onItemContextMenu = (e: React.MouseEvent, id: NodeId) => {
+    e.preventDefault()
+    const sel = useCadStore.getState().selectedIds
+    const ids = sel.includes(id) ? sel : [id]
+    if (!sel.includes(id)) select([id])
+    const node = nodes[id]
+    const entries: ContextMenuEntry[] = []
+    if (ids.length === 1 && node && isEditableSketch(node)) {
+      entries.push({ label: 'Edit sketch', onSelect: () => editSketch(id) })
+      entries.push('separator')
+    }
+    entries.push(...objectMenuEntries(ids))
+    openContextMenu(e.clientX, e.clientY, entries)
+  }
+
   return (
     <div className="flex items-center gap-1 overflow-x-auto border-t border-line bg-panel px-2 py-1.5">
       <span className="mr-1 shrink-0 text-xs font-semibold uppercase tracking-wide text-fg-faint">
@@ -41,6 +58,7 @@ export function Timeline() {
             type="button"
             onClick={() => select([id])}
             onDoubleClick={() => editable && editSketch(id)}
+            onContextMenu={(e) => onItemContextMenu(e, id)}
             title={editable ? `${node.name} — double-click to edit sketch` : node.name}
             className={
               'flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 text-xs ' +

@@ -1,9 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <rect width="512" height="512" rx="96" fill="#15161b"/>
-  <g transform="translate(256 268)">
-    <!-- isometric cube -->
-    <polygon points="0,-150 150,-65 0,20 -150,-65" fill="#6ea8fe"/>
-    <polygon points="0,20 150,-65 150,105 0,190" fill="#3f74c9"/>
-    <polygon points="0,20 -150,-65 -150,105 0,190" fill="#2b5394"/>
+  <!-- Isometric metal ingot: a cast bar with draft-angle sloped sides
+       (wide base, narrower top) — the namesake "ingot" form. Three
+       shaded faces read it as a solid 3D block in the brand blue. -->
+  <g transform="translate(256 284) scale(.85)">
+    <!-- left face (darkest) -->
+    <polygon points="43,135 -234,-25 -156,-130 35,-20" fill="#294f8f"/>
+    <!-- right face (mid) -->
+    <polygon points="43,135 234,25 156,-90 35,-20" fill="#3f74c9"/>
+    <!-- top face (lightest) -->
+    <polygon points="35,-20 156,-90 -35,-200 -156,-130" fill="#74acff"/>
+    <!-- polished top-edge highlight (metallic glint) -->
+    <polyline points="-156,-130 35,-20 156,-90" fill="none" stroke="#bcd4ff"
+      stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
   </g>
 </svg>

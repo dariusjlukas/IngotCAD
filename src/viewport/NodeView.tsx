@@ -87,8 +87,8 @@ export function NodeView({ id }: { id: NodeId }) {
   const isOnlySelected = useCadStore((s) => s.selectedIds.length === 1 && s.selectedIds[0] === id)
   const select = useCadStore((s) => s.select)
   const toggleSelect = useCadStore((s) => s.toggleSelect)
-  const transformNode = useCadStore((s) => s.transformNode)
-  const gizmoMode = useViewportStore((s) => s.gizmoMode)
+  const setNodeTransform = useCadStore((s) => s.setNodeTransform)
+  const tool = useViewportStore((s) => s.tool)
   const requestFocus = useViewportStore((s) => s.requestFocus)
   const choosing = useSketchStore((s) => s.choosing)
   const planeTool = usePlaneBuilderStore((s) => s.tool)
@@ -123,7 +123,7 @@ export function NodeView({ id }: { id: NodeId }) {
   const hoverTriRef = useRef<number>(-1)
 
   useEffect(() => {
-    // `isOnlySelected` is a dep so this re-runs when the gizmo mounts and
+    // `isOnlySelected`/`tool` are deps so this re-runs when the gizmo mounts and
     // `controlsRef.current` becomes available — not just when the mesh changes.
     const controls = controlsRef.current
     if (!controls || !meshObj || !isOnlySelected) return
@@ -131,12 +131,12 @@ export function NodeView({ id }: { id: NodeId }) {
       if (e.value) return // drag started — do nothing
       const next = objectToTransform(meshObj)
       if (transformRef.current && !transformsEqual(next, transformRef.current)) {
-        transformNode(id, next)
+        setNodeTransform(id, next)
       }
     }
     controls.addEventListener('dragging-changed', onDragging)
     return () => controls.removeEventListener('dragging-changed', onDragging)
-  }, [meshObj, id, transformNode, isOnlySelected])
+  }, [meshObj, id, setNodeTransform, isOnlySelected, tool])
 
   const hoverGeometry = useMemo(() => {
     if (pick?.kind !== 'face') return null
@@ -200,7 +200,7 @@ export function NodeView({ id }: { id: NodeId }) {
     if (sk.choosing) {
       if (e.face) {
         const n = e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
-        sk.chooseFace([e.point.x, e.point.y, e.point.z], [n.x, n.y, n.z])
+        sk.chooseFace([e.point.x, e.point.y, e.point.z], [n.x, n.y, n.z], id)
       }
       return
     }
@@ -327,8 +327,8 @@ export function NodeView({ id }: { id: NodeId }) {
       {pick?.kind === 'vertex' && <VertexMarker pos={pick.pos} />}
       {pick?.kind === 'edge' && <EdgeMarker a={pick.a} b={pick.b} />}
 
-      {isOnlySelected && meshObj && !facePicking && (
-        <TransformControls ref={controlsRef} object={meshObj} mode={gizmoMode} />
+      {isOnlySelected && meshObj && !facePicking && tool !== 'select' && (
+        <TransformControls ref={controlsRef} object={meshObj} mode={tool} />
       )}
     </>
   )

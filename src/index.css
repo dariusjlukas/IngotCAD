@@ -18,6 +18,7 @@
   --color-panel: #f3f4f6; /* sidebars, toolbar, menu bar, status bar */
   --color-elevated: #e5e7eb; /* inputs, hovered surfaces */
   --color-overlay: rgb(255 255 255 / 0.7); /* viewport loading scrim */
+  --color-sketch-scrim: rgb(255 255 255 / 0.55); /* dims the 3D scene behind a sketch */
 
   --color-line: #e5e7eb; /* default 1px borders + thin dividers */
   --color-line-strong: #d1d5db; /* stronger borders / dividers */
@@ -44,6 +45,7 @@
   --color-panel: #171717; /* neutral-900 */
   --color-elevated: #262626; /* neutral-800 */
   --color-overlay: rgb(10 10 10 / 0.6);
+  --color-sketch-scrim: rgb(8 9 13 / 0.6); /* dims the 3D scene behind a sketch */
 
   --color-line: #262626; /* neutral-800 */
   --color-line-strong: #404040; /* neutral-700 */

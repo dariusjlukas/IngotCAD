@@ -128,12 +128,46 @@ function useKeyboardShortcuts(): void {
         return
       }
       const vp = useViewportStore.getState()
-      if (e.key === 'w' || e.key === 'W') vp.setGizmoMode('translate')
-      else if (e.key === 'e' || e.key === 'E') vp.setGizmoMode('rotate')
-      else if (e.key === 'r' || e.key === 'R') vp.setGizmoMode('scale')
+      if (e.key === 'q' || e.key === 'Q') vp.setTool('select')
+      else if (e.key === 'w' || e.key === 'W') vp.setTool('translate')
+      else if (e.key === 'e' || e.key === 'E') vp.setTool('rotate')
+      else if (e.key === 'r' || e.key === 'R') vp.setTool('scale')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+}
+
+/** True if `el` sits inside an active (non-empty) text selection — i.e. the user
+ * right-clicked on highlighted text. Used to let the native menu through so copy
+ * and browser/extension actions (e.g. "translate selection") stay available.
+ * Requiring the target to intersect the selection range keeps a stale selection
+ * elsewhere from re-enabling the native menu over the viewport or panels. */
+function isOverTextSelection(el: HTMLElement | null): boolean {
+  if (!el) return false
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0 || sel.toString().trim() === '') return false
+  return sel.getRangeAt(0).intersectsNode(el)
+}
+
+/** Suppress the browser's native right-click menu app-wide, so right-click is
+ * consistent everywhere: elements with a custom context menu (outliner,
+ * timeline, viewport) show it, and everywhere else shows nothing rather than the
+ * OS/browser menu. Custom-menu handlers run first (via React) and open the menu;
+ * this listener only adds a harmless extra preventDefault for the rest. Editable
+ * fields and highlighted text keep their native menu so right-click
+ * cut/copy/paste/spellcheck/translate works. */
+function useSuppressNativeContextMenu(): void {
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
+        return
+      if (isOverTextSelection(el)) return
+      e.preventDefault()
+    }
+    window.addEventListener('contextmenu', onContextMenu)
+    return () => window.removeEventListener('contextmenu', onContextMenu)
   }, [])
 }
 
@@ -141,10 +175,15 @@ export default function App() {
   const ready = useEngineReady()
   const sketching = useSketchStore((s) => s.active)
   const choosingPlane = useSketchStore((s) => s.choosing)
+  // The sketch SVG + scrim track the camera transition, not `active`: dim once the
+  // fly-in begins, reveal the canvas only once docked head-on to the plane (so the
+  // 2D lines never sit over a moving backdrop), and clear instantly on exit.
+  const sketchCamPhase = useViewportStore((s) => s.sketchCamPhase)
   const [leftWidth, setLeftWidth] = useState(224)
   const [rightWidth, setRightWidth] = useState(256)
   useApplyTheme()
   useKeyboardShortcuts()
+  useSuppressNativeContextMenu()
 
   // Restore the last session, then mirror future changes to localStorage.
   useEffect(() => {
@@ -169,7 +208,12 @@ export default function App() {
           {/* The 3D viewport stays mounted (keeps the WebGL context + engine warm);
               the sketch canvas overlays it while sketching. */}
           <Viewport />
-          {sketching && <SketchCanvas />}
+          {/* Dim the 3D scene behind the sketch so the geometry + projection lines
+              read clearly; sits under the sketch SVG (z-10) and passes clicks. */}
+          {(sketchCamPhase === 'entering' || sketchCamPhase === 'locked') && (
+            <div className="pointer-events-none absolute inset-0 z-[5] bg-sketch-scrim" />
+          )}
+          {sketchCamPhase === 'locked' && <SketchCanvas />}
           {choosingPlane && <PlanePicker />}
           {!sketching && <PlaneBuilderOverlay />}
           <OperationConfirm />

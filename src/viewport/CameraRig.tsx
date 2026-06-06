@@ -10,7 +10,7 @@ import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
 import { usePrefsStore } from '../preferences/prefsStore'
-import { DEFAULT_CAMERA_POSITION } from './viewportStore'
+import { DEFAULT_CAMERA_POSITION, useViewportStore } from './viewportStore'
 
 const FOV = 45
 // For an orthographic camera the position distance doesn't affect scale (only
@@ -24,6 +24,11 @@ interface OrbitLike {
 
 export function CameraRig() {
   const projection = usePrefsStore((s) => s.projection)
+  // The sketch camera lock forces orthographic for the whole sketch session
+  // (parallel projection aligns the locked camera with the flat SVG overlay, and
+  // staying ortho across both fly-in/out animations avoids interpolating the
+  // projection). The persisted pref is untouched and takes over again on exit.
+  const sketchCamPhase = useViewportStore((s) => s.sketchCamPhase)
   // `camera` drives the effect's dependency (it changes on a projection swap);
   // `get()` is used to read it fresh inside handlers so we can mutate it.
   const camera = useThree((s) => s.camera)
@@ -39,6 +44,9 @@ export function CameraRig() {
   })
 
   useFrame((state) => {
+    // During a sketch (and its fly-in/out) SketchCameraLock owns the camera.
+    // Don't record that pose, or the pre-sketch framing is lost on exit.
+    if (useViewportStore.getState().sketchCamPhase !== 'idle') return
     const cam = state.camera
     const target = controls?.target ?? pose.current.target
     const offset = new THREE.Vector3().subVectors(cam.position, target)
@@ -58,6 +66,13 @@ export function CameraRig() {
   const first = useRef(true)
   useEffect(() => {
     if (!controls) return
+    // During a sketch (and its fly-in/out) SketchCameraLock owns the framing, so
+    // skip the projection-swap reframing here. Once idle again this runs normally
+    // and reproduces the pre-sketch framing on the swapped-back camera.
+    if (useViewportStore.getState().sketchCamPhase !== 'idle') {
+      first.current = false
+      return
+    }
     const cam = get().camera
     const ortho = cam as THREE.OrthographicCamera
     if (first.current) {
@@ -79,7 +94,7 @@ export function CameraRig() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera])
 
-  return projection === 'orthographic' ? (
+  return projection === 'orthographic' || sketchCamPhase !== 'idle' ? (
     <OrthographicCamera makeDefault near={0.1} far={20000} position={DEFAULT_CAMERA_POSITION} />
   ) : (
     <PerspectiveCamera

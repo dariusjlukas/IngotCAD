@@ -7,11 +7,12 @@ import {
   faCircle,
   faPencil,
   faBorderAll,
+  faArrowPointer,
 } from '@fortawesome/free-solid-svg-icons'
 import { useCadStore } from '../document/store'
 import { selectCanRedo, selectCanUndo, selectSingleSelected } from '../document/selectors'
 import { useViewportStore } from '../viewport/viewportStore'
-import type { GizmoMode } from '../viewport/viewportStore'
+import type { ToolMode } from '../viewport/viewportStore'
 import { usePlaneBuilderStore } from '../viewport/planeBuilderStore'
 import { useSketchStore } from '../sketch/sketchStore'
 import { openContextMenu } from './contextMenuStore'
@@ -70,8 +71,8 @@ export function Toolbar() {
   const undo = useCadStore((s) => s.undo)
   const redo = useCadStore((s) => s.redo)
 
-  const gizmoMode = useViewportStore((s) => s.gizmoMode)
-  const setGizmoMode = useViewportStore((s) => s.setGizmoMode)
+  const tool = useViewportStore((s) => s.tool)
+  const setTool = useViewportStore((s) => s.setTool)
   const openSketch = useSketchStore((s) => s.open)
   const startPlaneTool = usePlaneBuilderStore((s) => s.start)
 
@@ -92,8 +93,8 @@ export function Toolbar() {
   const hasSelection = selectedIds.length > 0
   const canUngroup = selected != null && selected.kind !== 'primitive'
 
-  const modeBtn = (mode: GizmoMode, label: string, key: string) => (
-    <Btn onClick={() => setGizmoMode(mode)} active={gizmoMode === mode} title={`${label} (${key})`}>
+  const modeBtn = (mode: ToolMode, label: string, key: string) => (
+    <Btn onClick={() => setTool(mode)} active={tool === mode} title={`${label} (${key})`}>
       {label}
     </Btn>
   )
@@ -121,6 +122,9 @@ export function Toolbar() {
       <Divider />
 
       <Group>
+        <Btn onClick={() => setTool('select')} active={tool === 'select'} title="Select (Q)">
+          <FontAwesomeIcon icon={faArrowPointer} fixedWidth /> Select
+        </Btn>
         {modeBtn('translate', 'Move', 'W')}
         {modeBtn('rotate', 'Rotate', 'E')}
         {modeBtn('scale', 'Scale', 'R')}

@@ -102,6 +102,88 @@ describe('operation store', () => {
     expect(op().pending?.value).toBe(360)
   })
 
+  const SQUARE: [number, number][][] = [
+    [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ],
+  ]
+
+  const startOnObject = (sourceNodeId: string) =>
+    op().start({
+      mode: 'extrude',
+      profile: SQUARE,
+      transform: IDENTITY_TRANSFORM,
+      segments: 64,
+      value: 5,
+      flip: false,
+      sketch: SRC,
+      sourceNodeId,
+    })
+
+  it('defaults to union when the sketch was drawn on an object', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    expect(op().pending?.combine).toBe('union')
+  })
+
+  it('confirm with union folds the new solid into the source object', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    op().confirm()
+    const roots = cad().doc.rootIds
+    expect(roots).toHaveLength(1)
+    const node = cad().doc.nodes[roots[0]]
+    expect(node.kind).toBe('boolean')
+    if (node.kind === 'boolean') {
+      expect(node.op).toBe('union')
+      // Child order is [target, new]: the source object first.
+      expect(node.childIds[0]).toBe(box)
+      expect(node.childIds).toHaveLength(2)
+      expect(cad().doc.nodes[node.childIds[1]].kind).toBe('primitive')
+    }
+    expect(cad().selectedIds).toEqual([roots[0]])
+  })
+
+  it('confirm with subtract cuts the new solid out of the source object', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    op().setCombine('subtract')
+    op().confirm()
+    const roots = cad().doc.rootIds
+    expect(roots).toHaveLength(1)
+    const node = cad().doc.nodes[roots[0]]
+    expect(node.kind === 'boolean' && node.op).toBe('subtract')
+    // First child (minuend) must be the existing object.
+    expect(node.kind === 'boolean' && node.childIds[0]).toBe(box)
+  })
+
+  it('confirm with new keeps the result as a separate object', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    op().setCombine('new')
+    op().confirm()
+    const roots = cad().doc.rootIds
+    expect(roots).toHaveLength(2)
+    expect(roots).toContain(box)
+  })
+
+  it('a cardinal-plane sketch has no source object and defaults to new', () => {
+    op().start({
+      mode: 'extrude',
+      profile: SQUARE,
+      transform: IDENTITY_TRANSFORM,
+      segments: 64,
+      value: 5,
+      flip: false,
+      sketch: SRC,
+    })
+    expect(op().pending?.sourceNodeId).toBeNull()
+    expect(op().pending?.combine).toBe('new')
+  })
+
   it('setSignedValue auto-flips extrude on negative and keeps |value| positive', () => {
     const tri: [number, number][][] = [
       [

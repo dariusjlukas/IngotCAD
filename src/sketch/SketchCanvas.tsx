@@ -563,13 +563,15 @@ export function SketchCanvas() {
   })()
 
   return (
-    <div className="absolute inset-0 z-10 bg-neutral-950">
+    // Transparent so the locked 3D viewport (the sketch plane head-on, scene
+    // dimmed) shows through behind the sketch geometry and projection lines.
+    <div className="absolute inset-0 z-10">
       <svg
         ref={svgRef}
         viewBox={`${view.cx - view.size / 2} ${-view.cy - view.size / 2} ${view.size} ${view.size}`}
         preserveAspectRatio="xMidYMid meet"
         className="h-full w-full touch-none"
-        style={{ cursor: tool === null ? 'default' : 'crosshair', background: '#0e0f13' }}
+        style={{ cursor: tool === null ? 'default' : 'crosshair', background: 'transparent' }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

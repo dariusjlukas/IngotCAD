@@ -38,6 +38,8 @@ export function CameraController() {
   })
 
   useEffect(() => {
+    // SketchCameraLock owns the camera during a sketch + its fly-in/out.
+    if (useViewportStore.getState().sketchCamPhase !== 'idle') return
     if (!focusTarget || !controls) return
     const center = new THREE.Vector3(...focusTarget.center)
     const radius = Math.max(focusTarget.radius, 0.5)
@@ -65,6 +67,7 @@ export function CameraController() {
 
   // Fly back to the home view when the user clicks the reset/home button.
   useEffect(() => {
+    if (useViewportStore.getState().sketchCamPhase !== 'idle') return
     if (resetNonce === 0 || !controls) return
     const a = anim.current
     a.fromPos.copy(camera.position)
@@ -80,6 +83,7 @@ export function CameraController() {
   // Snap to a named view (Top/Front/Right/Iso): keep the target + distance, just
   // rotate the camera to look along the requested direction.
   useEffect(() => {
+    if (useViewportStore.getState().sketchCamPhase !== 'idle') return
     if (!viewRequest || !controls) return
     const dir = new THREE.Vector3(...viewRequest.dir)
     if (dir.lengthSq() < 1e-9) return
@@ -98,7 +102,7 @@ export function CameraController() {
 
   useFrame((_, delta) => {
     const a = anim.current
-    if (!a.active || !controls) return
+    if (useViewportStore.getState().sketchCamPhase !== 'idle' || !a.active || !controls) return
     a.t = Math.min(1, a.t + delta / DURATION)
     const e = easeInOutCubic(a.t)
     camera.position.lerpVectors(a.fromPos, a.toPos, e)
