@@ -10,6 +10,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faHouse } from '@fortawesome/free-solid-svg-icons'
 import { CadScene } from './CadScene'
 import { BuildVolume } from './BuildVolume'
+import { SectionPlaneVisual } from './SectionPlaneVisual'
+import { MeasureVisuals } from './MeasureVisuals'
 import { ConstructionPlanes } from './ConstructionPlanes'
 import { CameraController } from './CameraController'
 import { CameraRig } from './CameraRig'
@@ -142,7 +144,9 @@ export function Viewport() {
           near: 0.1,
           far: 10000,
         }}
-        gl={{ antialias: true }}
+        // localClippingEnabled powers the section view; it costs nothing while
+        // no material lists clipping planes.
+        gl={{ antialias: true, localClippingEnabled: true }}
         dpr={[1, 2]}
         onPointerMissed={() => clearSelection()}
       >
@@ -156,10 +160,12 @@ export function Viewport() {
           <BuildPlateGrid cellColor={theme.gridMinor} sectionColor={theme.gridMajor} />
         )}
         {!inSketchView && <BuildVolume />}
+        {!inSketchView && <SectionPlaneVisual />}
 
         <CadScene />
         <ConstructionPlanes />
         <OperationPreview />
+        <MeasureVisuals />
 
         <CameraRig />
         <CameraController />

@@ -55,5 +55,9 @@ export function localHash(doc: CadDocument, id: NodeId): string {
       return `SH:${t(node.thickness)},${node.openTop ? 1 : 0}:[${node.childIds
         .map((c) => fullHash(doc, c))
         .join(',')}]`
+    case 'edgeTreatment':
+      return `ET:${JSON.stringify(node.entries)}:[${node.childIds
+        .map((c) => fullHash(doc, c))
+        .join(',')}]`
   }
 }

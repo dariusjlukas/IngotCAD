@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 import { useSketchStore } from './sketchStore'
 import type { Ref, SketchTool } from './sketchStore'
 import type { ConstraintInput, PointId } from './model'
-import { constraintLabel, cornerNeighbors } from './model'
+import { arcOfSegment, arcRadius, canTreatCorner, constraintLabel, cornerNeighbors } from './model'
 import { distance, maxCornerSize } from './geometry'
 import type { Vec2 } from '../document/types'
 import { NumberField } from '../ui/NumberField'
@@ -16,6 +16,7 @@ const DRAW_TOOLS: { id: SketchTool; label: string }[] = [
   { id: 'line', label: 'Line' },
   { id: 'rectangle', label: 'Rectangle' },
   { id: 'circle', label: 'Circle' },
+  { id: 'arc', label: 'Arc' },
   { id: 'fillet', label: 'Fillet' },
   { id: 'chamfer', label: 'Chamfer' },
   { id: 'dimension', label: 'Dimension' },
@@ -27,9 +28,11 @@ const TOOL_HINT: Record<string, string> = {
   line: 'Click to add points; click the first point or double-click to close.',
   rectangle: 'Drag to draw a rectangle (it stays rectangular).',
   circle: 'Drag from the center to set the radius.',
+  arc: 'Drag a loop segment sideways to bow it into an arc; drag it back flat to straighten.',
   fillet: 'Drag from a loop corner to round it; fine-tune the radius in Properties.',
   chamfer: 'Drag from a loop corner to bevel it; fine-tune the setback in Properties.',
-  dimension: 'Click two points (or a segment); move to place, click, then type a value.',
+  dimension:
+    'Click two points or a segment (a second segment makes an angle; an arc or circle makes a radius); move to place, click, then type a value.',
   project:
     'Click a section outline (the gray in-plane cross-section of the scene) to include it as anchored sketch geometry.',
 }
@@ -230,6 +233,35 @@ export function SketchToolsPanel() {
       apply({ kind, a: selSegs[0].a, b: selSegs[0].b, c: selSegs[1].a, d: selSegs[1].b })
   }
 
+  // Tangent applies to a straight segment + a circle, or a straight segment + an
+  // arc segment (exactly one of two selected segments is an arc).
+  const tangentTarget = (() => {
+    if (selSegs.length === 1 && selCircles.length === 1) {
+      if (arcOfSegment(data, selSegs[0].a, selSegs[0].b)) return null
+      const s = data.shapes.find((x) => x.id === selCircles[0])
+      if (!s || s.kind !== 'circle') return null
+      return { line: selSegs[0], c: s.c, shape: s.id }
+    }
+    if (selSegs.length === 2 && selCircles.length === 0) {
+      const arc0 = arcOfSegment(data, selSegs[0].a, selSegs[0].b)
+      const arc1 = arcOfSegment(data, selSegs[1].a, selSegs[1].b)
+      if (arc0 && !arc1) return { line: selSegs[1], c: arc0.arc.center }
+      if (arc1 && !arc0) return { line: selSegs[0], c: arc1.arc.center }
+    }
+    return null
+  })()
+
+  const applyTangent = () => {
+    if (!tangentTarget) return
+    apply({
+      kind: 'tangent',
+      a: tangentTarget.line.a,
+      b: tangentTarget.line.b,
+      c: tangentTarget.c,
+      ...(tangentTarget.shape && { shape: tangentTarget.shape }),
+    })
+  }
+
   const summary =
     selPoints.length || selSegs.length || selCircles.length
       ? [
@@ -274,6 +306,9 @@ export function SketchToolsPanel() {
           <CBtn onClick={() => applyPair('perpendicular')} disabled={selSegs.length !== 2}>
             Perpendicular
           </CBtn>
+          <CBtn onClick={applyTangent} disabled={!tangentTarget}>
+            Tangent
+          </CBtn>
           <CBtn onClick={() => togglePointFixed(selPoints)} disabled={selPoints.length === 0}>
             Fix / Unfix point
           </CBtn>
@@ -310,8 +345,10 @@ export function SketchToolsPanel() {
 export function SketchProperties() {
   const data = useSketchStore((s) => s.data)
   const selection = useSketchStore((s) => s.selection)
-  const setDistanceValue = useSketchStore((s) => s.setDistanceValue)
+  const setDimensionValue = useSketchStore((s) => s.setDimensionValue)
+  const setDimensionDiameter = useSketchStore((s) => s.setDimensionDiameter)
   const setCircleRadius = useSketchStore((s) => s.setCircleRadius)
+  const setArcRadius = useSketchStore((s) => s.setArcRadius)
   const setPointPos = useSketchStore((s) => s.setPointPos)
   const togglePointFixed = useSketchStore((s) => s.togglePointFixed)
   const setCornerTreatment = useSketchStore((s) => s.setCornerTreatment)
@@ -321,15 +358,25 @@ export function SketchProperties() {
 
   const single = selection.length === 1 ? selection[0] : null
 
-  // When a single loop-corner point is selected, expose its fillet/chamfer.
+  // When a single loop-corner point is selected, expose its fillet/chamfer
+  // (not next to an arc segment — the arc owns that corner's geometry).
   const cornerInfo = (() => {
     if (!single || single.t !== 'point') return null
+    if (!canTreatCorner(data, single.id)) return null
     const nb = cornerNeighbors(data, single.id)
     const p = data.points[single.id]
     if (!nb || !p) return null
     const loop = data.shapes.find((s) => s.kind === 'loop' && s.pts.includes(single.id))
     const treatment = loop && loop.kind === 'loop' ? loop.corners?.[single.id] : undefined
     return { pid: single.id, prev: nb.prev, next: nb.next, corner: [p.x, p.y] as Vec2, treatment }
+  })()
+
+  // When a single arc segment is selected, expose its derived radius.
+  const arcInfo = (() => {
+    if (!single || single.t !== 'segment') return null
+    const found = arcOfSegment(data, single.a, single.b)
+    if (!found) return null
+    return { a: single.a, b: single.b, r: arcRadius(data, found.loop, found.key) }
   })()
 
   // A sensible starting size when turning a plain corner into a fillet/chamfer.
@@ -353,23 +400,102 @@ export function SketchProperties() {
           single.t === 'constraint' &&
           (() => {
             const c = data.constraints.find((x) => x.id === single.id)
-            if (!c || c.kind !== 'distance') return null
-            return (
-              <div>
-                <div className="mb-1 text-xs uppercase tracking-wide text-fg-faint">Dimension</div>
-                <label className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-fg-faint">Value (mm)</span>
-                  <div className="w-20">
-                    <NumberField
-                      value={c.value}
-                      min={0.01}
-                      onCommit={(v) => setDistanceValue(c.id, v)}
-                    />
+            if (!c) return null
+            if (c.kind === 'distance')
+              return (
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-fg-faint">
+                    Dimension
                   </div>
-                </label>
-              </div>
-            )
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-fg-faint">Value (mm)</span>
+                    <div className="w-20">
+                      <NumberField
+                        value={c.value}
+                        min={0.01}
+                        onCommit={(v) => setDimensionValue(c.id, v)}
+                      />
+                    </div>
+                  </label>
+                </div>
+              )
+            if (c.kind === 'radius')
+              return (
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-fg-faint">
+                    Radius dimension
+                  </div>
+                  <div className="mb-2 flex overflow-hidden rounded border border-line-strong">
+                    {(['R', '⌀'] as const).map((m) => {
+                      const isDia = m === '⌀'
+                      const active = Boolean(c.diameter) === isDia
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setDimensionDiameter(c.id, isDia)}
+                          className={
+                            'flex-1 px-2 py-1 text-xs ' +
+                            (active
+                              ? 'bg-accent text-on-accent'
+                              : 'text-fg-muted hover:bg-elevated')
+                          }
+                        >
+                          {m}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-fg-faint">
+                      {c.diameter ? '⌀ (mm)' : 'R (mm)'}
+                    </span>
+                    <div className="w-20">
+                      <NumberField
+                        value={c.diameter ? c.value * 2 : c.value}
+                        min={0.1}
+                        onCommit={(v) => setDimensionValue(c.id, v)}
+                      />
+                    </div>
+                  </label>
+                </div>
+              )
+            if (c.kind === 'angle')
+              return (
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-fg-faint">
+                    Angle dimension
+                  </div>
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-fg-faint">Value (°)</span>
+                    <div className="w-20">
+                      <NumberField
+                        value={c.value}
+                        min={0.5}
+                        onCommit={(v) => setDimensionValue(c.id, v)}
+                      />
+                    </div>
+                  </label>
+                </div>
+              )
+            return null
           })()}
+
+        {arcInfo && (
+          <div>
+            <div className="mb-1 text-xs uppercase tracking-wide text-fg-faint">Arc</div>
+            <label className="flex items-center justify-between gap-2">
+              <span className="text-xs text-fg-faint">Radius (mm)</span>
+              <div className="w-20">
+                <NumberField
+                  value={arcInfo.r}
+                  min={0.1}
+                  onCommit={(r) => setArcRadius(arcInfo.a, arcInfo.b, r)}
+                />
+              </div>
+            </label>
+          </div>
+        )}
 
         {single && single.t === 'point' && data.points[single.id] && (
           <div>

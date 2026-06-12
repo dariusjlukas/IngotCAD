@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useCadStore } from '../document/store'
 import { engine } from '../engine/engine'
+import { useEngineStatusStore } from '../engine/engineStatusStore'
 import { usePrefsStore } from '../preferences/prefsStore'
 import { modelExceedsBuildVolume, useFitStore } from '../viewport/fitStore'
 
@@ -16,6 +17,8 @@ export function StatusBar() {
   const doc = useCadStore((s) => s.doc)
   const bounds = useFitStore((s) => s.bounds)
   const buildVolume = usePrefsStore((s) => s.buildVolume)
+  const evaluating = useEngineStatusStore((s) => s.pendingCount > 0)
+  const slow = useEngineStatusStore((s) => s.slow)
   // Tag the measurement with the node it describes so a stale result from a
   // previous selection is simply ignored at render time (no sync reset needed).
   const [info, setInfo] = useState<{ id: string; triangles: number; volume: number } | null>(null)
@@ -61,6 +64,15 @@ export function StatusBar() {
         </span>
       )}
       <div className="flex-1" />
+      {evaluating && (
+        <span
+          className={`flex items-center gap-1.5 ${slow ? 'text-fg' : 'text-fg-faint'}`}
+          title="The geometry engine is computing"
+        >
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+          Evaluating…
+        </span>
+      )}
       {current && (
         <>
           <span>{current.triangles.toLocaleString()} triangles</span>

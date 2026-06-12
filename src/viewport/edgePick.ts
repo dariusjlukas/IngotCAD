@@ -5,17 +5,18 @@
  * are shared by only one triangle of the face, so interior tessellation diagonals
  * (e.g. the diagonal splitting a box-side quad) are never picked. Endpoints are
  * returned in the geometry's local space.
+ *
+ * The boundary collection itself lives in src/geometry/edges.ts (shared with
+ * circle detection and the engine's edge treatments).
  */
 import * as THREE from 'three'
 import type { Vec3 } from '../document/types'
+import { collectCoplanarBoundary } from '../geometry/edges'
 
 export interface PickedEdge {
   a: Vec3
   b: Vec3
 }
-
-const COPLANAR_DOT = 0.9995
-const COPLANAR_OFF = 1e-2
 
 export function nearestCoplanarBoundaryEdge(
   geometry: THREE.BufferGeometry,
@@ -24,63 +25,17 @@ export function nearestCoplanarBoundaryEdge(
 ): PickedEdge | null {
   const pos = geometry.getAttribute('position') as THREE.BufferAttribute | undefined
   if (!pos) return null
-  const index = geometry.index
-  const triCount = (index ? index.count : pos.count) / 3
-  if (faceIndex < 0 || faceIndex >= triCount) return null
-  const vi = (i: number) => (index ? index.getX(i) : i)
-
-  const va = new THREE.Vector3()
-  const vb = new THREE.Vector3()
-  const vc = new THREE.Vector3()
-  const ab = new THREE.Vector3()
-  const ac = new THREE.Vector3()
-  const nrm = new THREE.Vector3()
-
-  /** Fill va/vb/vc with triangle t's verts; return its plane (unit normal + offset). */
-  const planeOf = (t: number): { nx: number; ny: number; nz: number; off: number } | null => {
-    va.fromBufferAttribute(pos, vi(3 * t))
-    vb.fromBufferAttribute(pos, vi(3 * t + 1))
-    vc.fromBufferAttribute(pos, vi(3 * t + 2))
-    ab.subVectors(vb, va)
-    ac.subVectors(vc, va)
-    nrm.crossVectors(ab, ac)
-    if (nrm.lengthSq() < 1e-12) return null
-    nrm.normalize()
-    return { nx: nrm.x, ny: nrm.y, nz: nrm.z, off: nrm.dot(va) }
-  }
-
-  const target = planeOf(faceIndex)
-  if (!target) return null
-
-  // Quantize vertex positions so welded (shared) vertices key identically.
-  const key = (x: number, y: number, z: number) =>
-    `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`
-  const edges = new Map<string, { count: number; a: Vec3; b: Vec3 }>()
-  const addEdge = (p: THREE.Vector3, q: THREE.Vector3) => {
-    const kp = key(p.x, p.y, p.z)
-    const kq = key(q.x, q.y, q.z)
-    const k = kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`
-    const e = edges.get(k)
-    if (e) e.count++
-    else edges.set(k, { count: 1, a: [p.x, p.y, p.z], b: [q.x, q.y, q.z] })
-  }
-
-  for (let t = 0; t < triCount; t++) {
-    const pl = planeOf(t) // also sets va/vb/vc to triangle t
-    if (!pl) continue
-    const dot = target.nx * pl.nx + target.ny * pl.ny + target.nz * pl.nz
-    if (dot <= COPLANAR_DOT || Math.abs(pl.off - target.off) >= COPLANAR_OFF) continue
-    addEdge(va, vb)
-    addEdge(vb, vc)
-    addEdge(vc, va)
-  }
+  const boundary = collectCoplanarBoundary(
+    { position: pos.array as ArrayLike<number>, index: geometry.index?.array ?? null },
+    faceIndex,
+  )
+  if (!boundary) return null
 
   let best: PickedEdge | null = null
   let bestD = Infinity
   const A = new THREE.Vector3()
   const B = new THREE.Vector3()
-  for (const e of edges.values()) {
-    if (e.count !== 1) continue // boundary edges only
+  for (const e of boundary.edges) {
     A.set(...e.a)
     B.set(...e.b)
     const d = distToSegment(localPoint, A, B)

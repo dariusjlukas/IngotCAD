@@ -17,6 +17,10 @@ import { SketchCanvas } from './sketch/SketchCanvas'
 import { SketchProperties, SketchToolbar, SketchToolsPanel } from './sketch/SketchPanels'
 import { PlanePicker } from './sketch/PlanePicker'
 import { PlaneBuilderOverlay } from './viewport/PlaneBuilderOverlay'
+import { MeasureOverlay } from './viewport/MeasureOverlay'
+import { SectionPanel } from './viewport/SectionPanel'
+import { EdgeTreatmentOverlay } from './viewport/EdgeTreatmentOverlay'
+import { toggleMeasure, useMeasureStore } from './viewport/measureStore'
 import { OperationConfirm } from './operation/OperationConfirm'
 import { Timeline } from './ui/Timeline'
 import { engine } from './engine/engine'
@@ -27,6 +31,7 @@ import { useOperationStore } from './operation/operationStore'
 import { useApplyTheme } from './preferences/useResolvedTheme'
 import { newProject, openProject, saveAs, saveProject } from './io/commands'
 import { restoreAutosave, startAutosave } from './io/autosave'
+import { FaceRefMonitor } from './document/FaceRefMonitor'
 
 function useEngineReady(): boolean {
   const [ready, setReady] = useState(engine.isReady())
@@ -127,11 +132,26 @@ function useKeyboardShortcuts(): void {
         frameSelected()
         return
       }
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault()
+        toggleMeasure()
+        return
+      }
       const vp = useViewportStore.getState()
-      if (e.key === 'q' || e.key === 'Q') vp.setTool('select')
-      else if (e.key === 'w' || e.key === 'W') vp.setTool('translate')
-      else if (e.key === 'e' || e.key === 'E') vp.setTool('rotate')
-      else if (e.key === 'r' || e.key === 'R') vp.setTool('scale')
+      const stopMeasure = () => useMeasureStore.getState().cancel()
+      if (e.key === 'q' || e.key === 'Q') {
+        vp.setTool('select')
+        stopMeasure()
+      } else if (e.key === 'w' || e.key === 'W') {
+        vp.setTool('translate')
+        stopMeasure()
+      } else if (e.key === 'e' || e.key === 'E') {
+        vp.setTool('rotate')
+        stopMeasure()
+      } else if (e.key === 'r' || e.key === 'R') {
+        vp.setTool('scale')
+        stopMeasure()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -216,6 +236,9 @@ export default function App() {
           {sketchCamPhase === 'locked' && <SketchCanvas />}
           {choosingPlane && <PlanePicker />}
           {!sketching && <PlaneBuilderOverlay />}
+          {!sketching && <MeasureOverlay />}
+          {!sketching && <EdgeTreatmentOverlay />}
+          {!sketching && <SectionPanel />}
           <OperationConfirm />
           {!ready && !sketching && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-overlay text-sm text-fg-muted">
@@ -239,6 +262,7 @@ export default function App() {
       <ShortcutsDialog />
       <Toaster />
       <ContextMenuHost />
+      <FaceRefMonitor />
     </div>
   )
 }

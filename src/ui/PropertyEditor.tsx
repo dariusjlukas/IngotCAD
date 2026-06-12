@@ -6,6 +6,7 @@ import { textToContours } from '../text/font'
 import { toast } from './toastStore'
 import { primitiveLocalDimensions } from '../document/scaleBake'
 import type {
+  EdgeTreatmentNode,
   PatternMode,
   PatternNode,
   PatternSpec,
@@ -15,6 +16,10 @@ import type {
   ShellNode,
   Vec3,
 } from '../document/types'
+import { useEvalWarningsStore, warningsForNode } from '../engine/evalWarningsStore'
+import { useEdgeTreatmentStore } from '../viewport/edgeTreatmentStore'
+import { useFaceRefStatusStore } from '../document/faceRefStatusStore'
+import type { StaleFaceInfo } from '../document/faceRefStatusStore'
 import { NumberField, Vec3Field } from './NumberField'
 
 const PLANE_KIND_LABEL: Record<PlaneDefinition['kind'], string> = {
@@ -415,6 +420,101 @@ function PatternEditor({ node }: { node: PatternNode }) {
   )
 }
 
+/**
+ * Warning banner for a face-derived plane / face-attached sketch whose source
+ * face moved or vanished. Rebind (when possible) is one normal undoable edit.
+ */
+function StaleFaceBanner({
+  dependentKey,
+  onRebind,
+}: {
+  dependentKey: string
+  onRebind?: (rebind: NonNullable<StaleFaceInfo['rebind']>) => void
+}) {
+  const info = useFaceRefStatusStore((s) => s.stale[dependentKey])
+  if (!info) return null
+  return (
+    <div className="space-y-1.5 rounded border border-line-strong bg-elevated p-2">
+      <p className="text-xs text-danger">
+        ⚠{' '}
+        {info.status === 'moved'
+          ? 'The source face has moved; this no longer sits on it.'
+          : 'The source face no longer exists.'}
+      </p>
+      {info.status === 'moved' && info.rebind && onRebind && (
+        <MiniButton onClick={() => onRebind(info.rebind!)}>Rebind to face</MiniButton>
+      )}
+    </div>
+  )
+}
+
+function EdgeTreatmentEditor({ node }: { node: EdgeTreatmentNode }) {
+  const updateEdgeEntry = useCadStore((s) => s.updateEdgeEntry)
+  const removeEdgeEntry = useCadStore((s) => s.removeEdgeEntry)
+  const byRoot = useEvalWarningsStore((s) => s.byRoot)
+  const warnings = warningsForNode(byRoot, node.id)
+  const startPicking = useEdgeTreatmentStore((s) => s.start)
+  const pickingThis = useEdgeTreatmentStore((s) => s.nodeId === node.id)
+  const stopPicking = useEdgeTreatmentStore((s) => s.cancel)
+
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs uppercase tracking-wide text-fg-faint">
+        Edges ({node.entries.length})
+      </div>
+      {node.entries.length === 0 && (
+        <p className="text-xs text-fg-faint">No edges picked yet — use “Pick edges”.</p>
+      )}
+      {node.entries.map((entry, i) => {
+        const warned = warnings.some((w) => w.entryId === entry.id)
+        return (
+          <div key={entry.id} className="flex items-center gap-1.5">
+            <span
+              className="w-4 text-xs text-fg-faint"
+              title={warned ? warnings.find((w) => w.entryId === entry.id)?.message : undefined}
+            >
+              {warned ? '⚠' : i + 1}
+            </span>
+            <select
+              value={entry.kind}
+              onChange={(e) =>
+                updateEdgeEntry(node.id, entry.id, {
+                  kind: e.target.value as 'chamfer' | 'fillet',
+                })
+              }
+              className="flex-1 rounded bg-elevated px-1 py-0.5 text-xs text-fg outline-none"
+            >
+              <option value="chamfer">Chamfer</option>
+              <option value="fillet">Fillet</option>
+            </select>
+            <div className="w-16">
+              <NumberField
+                value={entry.size}
+                min={0.05}
+                live
+                onCommit={(size) => updateEdgeEntry(node.id, entry.id, { size })}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => removeEdgeEntry(node.id, entry.id)}
+              className="rounded px-1 text-fg-faint hover:bg-elevated hover:text-danger"
+              title="Remove this edge"
+            >
+              ×
+            </button>
+          </div>
+        )
+      })}
+      <MiniButton
+        onClick={() => (pickingThis ? stopPicking() : startPicking(node.id, 'chamfer', 2))}
+      >
+        {pickingThis ? 'Done picking' : 'Pick edges…'}
+      </MiniButton>
+    </div>
+  )
+}
+
 function ShellEditor({ node }: { node: ShellNode }) {
   const setShellParams = useCadStore((s) => s.setShellParams)
   return (
@@ -494,14 +594,33 @@ function PlaneEditor({ width, planeId }: { width: number; planeId: string }) {
         )}
 
         {def.kind === 'face' && (
-          <Field label="Offset (mm)">
-            <NumberField
-              value={def.distance}
-              step={1}
-              live
-              onCommit={(distance) => setPlaneDefinition(planeId, { ...def, distance })}
+          <>
+            <Field label="Offset (mm)">
+              <NumberField
+                value={def.distance}
+                step={1}
+                live
+                onCommit={(distance) => setPlaneDefinition(planeId, { ...def, distance })}
+              />
+            </Field>
+            <StaleFaceBanner
+              dependentKey={planeId}
+              onRebind={(rebind) =>
+                def.source &&
+                setPlaneDefinition(planeId, {
+                  kind: 'face',
+                  origin: rebind.origin,
+                  normal: rebind.normal,
+                  distance: def.distance,
+                  source: {
+                    nodeId: def.source.nodeId,
+                    normal: rebind.localNormal,
+                    offset: rebind.localOffset,
+                  },
+                })
+              }
             />
-          </Field>
+          </>
         )}
 
         {def.kind === 'edgeAngle' && (
@@ -666,11 +785,29 @@ export function PropertyEditor({ width }: { width: number }) {
           </div>
         )}
 
-        {(node.kind === 'pattern' || node.kind === 'shell') && (
+        {/* Face-attached sketch whose source face drifted: flag only (re-pick
+            via Edit Sketch); planes additionally offer a one-click rebind. */}
+        {node.kind === 'primitive' &&
+          (node.params.type === 'extrusion' || node.params.type === 'revolution') && (
+            <StaleFaceBanner dependentKey={node.id} />
+          )}
+
+        {(node.kind === 'pattern' || node.kind === 'shell' || node.kind === 'edgeTreatment') && (
           <div className="space-y-2 border-t border-line pt-3">
-            {node.kind === 'pattern' ? <PatternEditor node={node} /> : <ShellEditor node={node} />}
+            {node.kind === 'pattern' ? (
+              <PatternEditor node={node} />
+            ) : node.kind === 'shell' ? (
+              <ShellEditor node={node} />
+            ) : (
+              <EdgeTreatmentEditor node={node} />
+            )}
             <MiniButton onClick={() => ungroup(id)}>
-              Remove {node.kind === 'pattern' ? 'pattern' : 'shell'}
+              Remove{' '}
+              {node.kind === 'pattern'
+                ? 'pattern'
+                : node.kind === 'shell'
+                  ? 'shell'
+                  : 'chamfer/fillet'}
             </MiniButton>
           </div>
         )}

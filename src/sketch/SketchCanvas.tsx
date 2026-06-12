@@ -13,9 +13,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Vec2 } from '../document/types'
 import { useSketchStore } from './sketchStore'
 import type { Ref } from './sketchStore'
-import type { PointId } from './model'
-import { cornerNeighbors, loopOutline, loopSegments } from './model'
-import { cornerPoints, distance, maxCornerSize, niceStep, pointInPolygon } from './geometry'
+import type { Constraint, PointId, ShapeId } from './model'
+import { canTreatCorner, cornerNeighbors, loopOutline, loopSegments } from './model'
+import {
+  arcFromSagitta,
+  arcPoints,
+  cornerPoints,
+  distance,
+  distToArc,
+  maxCornerSize,
+  niceStep,
+  pointInPolygon,
+} from './geometry'
 import { worldToLocalMatrix } from './plane'
 import { useCadStore } from '../document/store'
 import { engine } from '../engine/engine'
@@ -67,6 +76,22 @@ export function SketchCanvas() {
   const [projHover, setProjHover] = useState<number | null>(null)
   const [dimA, setDimA] = useState<PointId | null>(null)
   const [placing, setPlacing] = useState<{ a: PointId; b: PointId } | null>(null)
+  // Radius dimension being placed (leader follows the cursor angle).
+  const [placingRadius, setPlacingRadius] = useState<{
+    shape?: ShapeId
+    c: PointId
+    a?: PointId
+    b?: PointId
+  } | null>(null)
+  // Angle dimension being placed (dim arc follows the cursor distance).
+  const [placingAngle, setPlacingAngle] = useState<{
+    a: PointId
+    b: PointId
+    c: PointId
+    d: PointId
+  } | null>(null)
+  // Arc tool: bowing the loop segment a→b (loop order) by the dragged sagitta.
+  const [arcDrag, setArcDrag] = useState<{ a: PointId; b: PointId; sagitta: number } | null>(null)
   // Fillet/chamfer drag: the corner being sized and its (cyclic) neighbours.
   const [cornerDrag, setCornerDrag] = useState<{
     pid: PointId
@@ -91,10 +116,15 @@ export function SketchCanvas() {
     const p = data.points[id]
     return p ? [p.x, p.y] : [0, 0]
   }
+  // Loop segments in LOOP ORDER (a = start), carrying the segment's arc if any.
   const segments = useMemo(() => {
-    const segs: { a: PointId; b: PointId }[] = []
+    const segs: { a: PointId; b: PointId; arc?: { center: PointId; ccw: boolean } }[] = []
     for (const s of data.shapes)
-      if (s.kind === 'loop') for (const [a, b] of loopSegments(s.pts)) segs.push({ a, b })
+      if (s.kind === 'loop')
+        for (const [a, b] of loopSegments(s.pts)) {
+          const arc = s.arcs?.[a]
+          segs.push(arc ? { a, b, arc: { center: arc.center, ccw: arc.ccw } } : { a, b })
+        }
     return segs
   }, [data.shapes])
 
@@ -120,6 +150,7 @@ export function SketchCanvas() {
   const pointHitR = view.size * 0.02
   const segHitD = view.size * 0.012
   const defaultOff = view.size * 0.06
+  const fontSize = view.size * 0.03
 
   const hitPoint = (p: Vec2): PointId | null => {
     let best: PointId | null = null
@@ -133,11 +164,14 @@ export function SketchCanvas() {
     }
     return best
   }
-  const hitSegment = (p: Vec2): { a: PointId; b: PointId } | null => {
-    let best: { a: PointId; b: PointId } | null = null
+  const hitSegment = (p: Vec2): (typeof segments)[number] | null => {
+    let best: (typeof segments)[number] | null = null
     let bestD = segHitD
     for (const s of segments) {
-      const d = distToSeg(p, pos(s.a), pos(s.b))
+      const d =
+        s.arc && data.points[s.arc.center]
+          ? distToArc(p, pos(s.arc.center), pos(s.a), pos(s.b), s.arc.ccw)
+          : distToSeg(p, pos(s.a), pos(s.b))
       if (d < bestD) {
         bestD = d
         best = s
@@ -152,16 +186,87 @@ export function SketchCanvas() {
     }
     return null
   }
+  // --- dimension geometry helpers (shared by render, hit-test, and inline edit) ---
+
+  const radiusInfo = (
+    c: Extract<Constraint, { kind: 'radius' }>,
+  ): { center: Vec2; r: number } | null => {
+    const ctr = data.points[c.c]
+    if (!ctr) return null
+    if (c.shape) {
+      const s = data.shapes.find((x) => x.id === c.shape)
+      if (!s || s.kind !== 'circle') return null
+      return { center: [ctr.x, ctr.y], r: s.r }
+    }
+    if (c.a && c.b) {
+      const a = data.points[c.a]
+      const b = data.points[c.b]
+      if (!a || !b) return null
+      const r = (Math.hypot(a.x - ctr.x, a.y - ctr.y) + Math.hypot(b.x - ctr.x, b.y - ctr.y)) / 2
+      return { center: [ctr.x, ctr.y], r }
+    }
+    return null
+  }
+
+  const radiusLabelPos = (c: Extract<Constraint, { kind: 'radius' }>): Vec2 | null => {
+    const info = radiusInfo(c)
+    if (!info) return null
+    const ang = c.offset ?? Math.PI / 4
+    const d = info.r + fontSize * 2
+    return [info.center[0] + Math.cos(ang) * d, info.center[1] + Math.sin(ang) * d]
+  }
+
+  const angleInfo = (c: {
+    a: PointId
+    b: PointId
+    c: PointId
+    d: PointId
+  }): { X: Vec2; t1: number; sweep: number } | null => {
+    const A = pos(c.a)
+    const B = pos(c.b)
+    const C = pos(c.c)
+    const D = pos(c.d)
+    const d1: Vec2 = [B[0] - A[0], B[1] - A[1]]
+    const d2: Vec2 = [D[0] - C[0], D[1] - C[1]]
+    const denom = d1[0] * d2[1] - d1[1] * d2[0]
+    if (Math.abs(denom) < 1e-9) return null // near-parallel: no intersection to dimension
+    const t = ((C[0] - A[0]) * d2[1] - (C[1] - A[1]) * d2[0]) / denom
+    const X: Vec2 = [A[0] + d1[0] * t, A[1] + d1[1] * t]
+    const m1: Vec2 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2]
+    const m2: Vec2 = [(C[0] + D[0]) / 2, (C[1] + D[1]) / 2]
+    const t1 = Math.atan2(m1[1] - X[1], m1[0] - X[0])
+    const t2 = Math.atan2(m2[1] - X[1], m2[0] - X[0])
+    let sweep = t2 - t1
+    while (sweep > Math.PI) sweep -= 2 * Math.PI
+    while (sweep <= -Math.PI) sweep += 2 * Math.PI
+    return { X, t1, sweep }
+  }
+
+  const angleLabelPos = (c: Extract<Constraint, { kind: 'angle' }>): Vec2 | null => {
+    const info = angleInfo(c)
+    if (!info) return null
+    const mid = info.t1 + info.sweep / 2
+    const d = (c.offset ?? defaultOff) + fontSize * 0.9
+    return [info.X[0] + Math.cos(mid) * d, info.X[1] + Math.sin(mid) * d]
+  }
+
   const hitDimension = (p: Vec2): string | null => {
     for (const c of data.constraints) {
-      if (c.kind !== 'distance') continue
-      const a = pos(c.a)
-      const b = pos(c.b)
-      const n = normal(a, b)
-      const off = c.offset ?? defaultOff
-      const a2: Vec2 = [a[0] + n[0] * off, a[1] + n[1] * off]
-      const b2: Vec2 = [b[0] + n[0] * off, b[1] + n[1] * off]
-      if (distToSeg(p, a2, b2) < segHitD * 1.6) return c.id
+      if (c.kind === 'distance') {
+        const a = pos(c.a)
+        const b = pos(c.b)
+        const n = normal(a, b)
+        const off = c.offset ?? defaultOff
+        const a2: Vec2 = [a[0] + n[0] * off, a[1] + n[1] * off]
+        const b2: Vec2 = [b[0] + n[0] * off, b[1] + n[1] * off]
+        if (distToSeg(p, a2, b2) < segHitD * 1.6) return c.id
+      } else if (c.kind === 'radius') {
+        const lp = radiusLabelPos(c)
+        if (lp && distance(p, lp) < fontSize * 1.6) return c.id
+      } else if (c.kind === 'angle') {
+        const lp = angleLabelPos(c)
+        if (lp && distance(p, lp) < fontSize * 1.6) return c.id
+      }
     }
     return null
   }
@@ -208,7 +313,7 @@ export function SketchCanvas() {
   const commitEdit = () => {
     if (editing) {
       const v = parseFloat(editText)
-      if (!Number.isNaN(v)) st.getState().setDistanceValue(editing, v)
+      if (!Number.isNaN(v)) st.getState().setDimensionValue(editing, v)
     }
     setEditing(null)
   }
@@ -277,6 +382,9 @@ export function SketchCanvas() {
         setLineDraft([])
         setDimA(null)
         setPlacing(null)
+        setPlacingRadius(null)
+        setPlacingAngle(null)
+        setArcDrag(null)
         setCornerDrag(null)
         setEditing(null)
         st.getState().setTool(null)
@@ -346,7 +454,88 @@ export function SketchCanvas() {
     }
 
     if (tool === 'dimension') {
+      if (placingRadius) {
+        // Click places the leader at the cursor's angle from the center.
+        const ctr = pos(placingRadius.c)
+        const ang = Math.atan2(raw[1] - ctr[1], raw[0] - ctr[0])
+        let value = 0
+        if (placingRadius.shape) {
+          const s = data.shapes.find((x) => x.id === placingRadius.shape)
+          value = s && s.kind === 'circle' ? s.r : 0
+        } else if (placingRadius.a && placingRadius.b) {
+          value = (distance(pos(placingRadius.a), ctr) + distance(pos(placingRadius.b), ctr)) / 2
+        }
+        if (value <= 0) {
+          setPlacingRadius(null)
+          return
+        }
+        const cid = st.getState().addRadiusDim(placingRadius, value, ang)
+        st.getState().select([{ t: 'constraint', id: cid }])
+        setPlacingRadius(null)
+        startEditing(cid, value)
+        return
+      }
+      if (placingAngle) {
+        const info = angleInfo(placingAngle)
+        if (!info) {
+          setPlacingAngle(null)
+          return
+        }
+        const off = Math.max(fontSize, distance(raw, info.X))
+        // Directed a→b to c→d angle, normalized into (0°, 180°] by flipping the
+        // second segment when reflex (both readings of crossing lines are valid).
+        const A = pos(placingAngle.a)
+        const B = pos(placingAngle.b)
+        const C = pos(placingAngle.c)
+        const D = pos(placingAngle.d)
+        const dd =
+          ((Math.atan2(D[1] - C[1], D[0] - C[0]) - Math.atan2(B[1] - A[1], B[0] - A[0])) * 180) /
+          Math.PI
+        const norm = ((dd % 360) + 360) % 360
+        const flip = norm > 180
+        const value = flip ? norm - 180 : norm
+        const cid = flip
+          ? st
+              .getState()
+              .addAngleDim(
+                placingAngle.a,
+                placingAngle.b,
+                placingAngle.d,
+                placingAngle.c,
+                value,
+                off,
+              )
+          : st
+              .getState()
+              .addAngleDim(
+                placingAngle.a,
+                placingAngle.b,
+                placingAngle.c,
+                placingAngle.d,
+                value,
+                off,
+              )
+        st.getState().select([{ t: 'constraint', id: cid }])
+        setPlacingAngle(null)
+        startEditing(cid, value)
+        return
+      }
       if (placing) {
+        // Clicking a second straight segment switches to an angle dimension.
+        const hs2 = hitSegment(raw)
+        if (
+          hs2 &&
+          !hs2.arc &&
+          !(
+            (hs2.a === placing.a && hs2.b === placing.b) ||
+            (hs2.a === placing.b && hs2.b === placing.a)
+          ) &&
+          angleInfo({ a: placing.a, b: placing.b, c: hs2.a, d: hs2.b })
+        ) {
+          setPlacingAngle({ a: placing.a, b: placing.b, c: hs2.a, d: hs2.b })
+          setPlacing(null)
+          return
+        }
         const off = Math.round(signedOffset(raw, pos(placing.a), pos(placing.b)))
         const value = distance(pos(placing.a), pos(placing.b))
         const cid = st.getState().addDistance(placing.a, placing.b, value, off)
@@ -366,11 +555,26 @@ export function SketchCanvas() {
       }
       const hs = hitSegment(raw)
       if (hs) {
-        setPlacing({ a: hs.a, b: hs.b })
+        // An arc segment gets a radius dimension; a straight one starts a
+        // distance (or, with a second segment click, an angle).
+        if (hs.arc) setPlacingRadius({ c: hs.arc.center, a: hs.a, b: hs.b })
+        else setPlacing({ a: hs.a, b: hs.b })
         return
       }
       const hc = hitCircle(raw)
-      if (hc) st.getState().select([{ t: 'circle', id: hc }])
+      if (hc) {
+        const s = data.shapes.find((x) => x.id === hc)
+        if (s && s.kind === 'circle') setPlacingRadius({ shape: s.id, c: s.c })
+      }
+      return
+    }
+
+    if (tool === 'arc') {
+      const hs = hitSegment(raw)
+      if (hs) {
+        setArcDrag({ a: hs.a, b: hs.b, sagitta: signedOffset(raw, pos(hs.a), pos(hs.b)) })
+        svgRef.current?.setPointerCapture(e.pointerId)
+      }
       return
     }
 
@@ -414,10 +618,14 @@ export function SketchCanvas() {
     if (tool === 'line' || tool === 'dimension') hover = hitPoint(rawMove)
     else if (tool === 'fillet' || tool === 'chamfer') {
       const hp = hitPoint(rawMove)
-      hover = hp && cornerNeighbors(data, hp) ? hp : null
+      hover = hp && cornerNeighbors(data, hp) && canTreatCorner(data, hp) ? hp : null
     }
     setSnapPoint(hover)
     setProjHover(tool === 'project' ? hitProjection(rawMove) : null)
+    if (arcDrag) {
+      setArcDrag({ ...arcDrag, sagitta: signedOffset(rawMove, pos(arcDrag.a), pos(arcDrag.b)) })
+      return
+    }
     if (cornerDrag) {
       setCornerDrag({ ...cornerDrag, size: distance(cornerDrag.corner, rawMove) })
       return
@@ -433,6 +641,18 @@ export function SketchCanvas() {
     svgRef.current?.releasePointerCapture?.(e.pointerId)
     if (panRef.current) {
       panRef.current = null
+      return
+    }
+    if (arcDrag) {
+      const { a, b, sagitta } = arcDrag
+      if (Math.abs(sagitta) < 0.5) {
+        // Dragged (or clicked) back to flat: remove any arc on the segment.
+        st.getState().removeSegmentArc(a, b)
+      } else {
+        const res = arcFromSagitta(pos(a), pos(b), sagitta)
+        if (res) st.getState().setSegmentArc(a, b, res.center, res.ccw)
+      }
+      setArcDrag(null)
       return
     }
     if (cornerDrag) {
@@ -479,7 +699,9 @@ export function SketchCanvas() {
       const cid = hitDimension(toModelRaw(e.clientX, e.clientY))
       if (cid) {
         const c = data.constraints.find((x) => x.id === cid)
-        if (c && c.kind === 'distance') startEditing(cid, c.value)
+        if (!c) return
+        if (c.kind === 'distance' || c.kind === 'angle') startEditing(cid, c.value)
+        else if (c.kind === 'radius') startEditing(cid, c.diameter ? c.value * 2 : c.value)
       }
     }
   }
@@ -505,7 +727,6 @@ export function SketchCanvas() {
     return { left, right, bottom, top, vs, hs }
   }, [view, aspect])
 
-  const fontSize = view.size * 0.03
   const vertexR = view.size * 0.0095
   const isSelPoint = (id: string) => selection.some((r) => r.t === 'point' && r.id === id)
   const isSelSeg = (a: string, b: string) =>
@@ -599,15 +820,163 @@ export function SketchCanvas() {
     )
   }
 
+  // Model-space label position of any dimension constraint (for inline editing).
+  const dimLabelModelPos = (c: Constraint): Vec2 | null => {
+    if (c.kind === 'distance') {
+      const a = pos(c.a)
+      const b = pos(c.b)
+      const n = normal(a, b)
+      const off = c.offset ?? defaultOff
+      return [(a[0] + b[0]) / 2 + n[0] * off, (a[1] + b[1]) / 2 + n[1] * off]
+    }
+    if (c.kind === 'radius') return radiusLabelPos(c)
+    if (c.kind === 'angle') return angleLabelPos(c)
+    return null
+  }
+
+  /** Leader + label for a radius/diameter dimension. */
+  const renderRadiusDim = (
+    c: Extract<Constraint, { kind: 'radius' }>,
+    color: string,
+  ): React.ReactNode => {
+    const info = radiusInfo(c)
+    const lp = radiusLabelPos(c)
+    if (!info || !lp) return null
+    const ang = c.offset ?? Math.PI / 4
+    const tip: Vec2 = [
+      info.center[0] + Math.cos(ang) * info.r,
+      info.center[1] + Math.sin(ang) * info.r,
+    ]
+    return (
+      <g key={c.id}>
+        <line
+          x1={info.center[0]}
+          y1={-info.center[1]}
+          x2={lp[0]}
+          y2={-lp[1]}
+          stroke={color}
+          strokeWidth={0.75}
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle cx={tip[0]} cy={-tip[1]} r={vertexR * 0.7} fill={color} />
+        <text
+          x={lp[0]}
+          y={-lp[1]}
+          fontSize={fontSize}
+          fill={color}
+          textAnchor="middle"
+          dominantBaseline="middle"
+        >
+          {c.diameter ? `⌀${r1(c.value * 2)}` : `R${r1(c.value)}`}
+        </text>
+      </g>
+    )
+  }
+
+  /** Dimension arc + label for an angle dimension (polyline; avoids SVG arc-flag sign traps). */
+  const renderAngleDim = (
+    c: { a: PointId; b: PointId; c: PointId; d: PointId; offset?: number },
+    value: number,
+    key: string,
+    color: string,
+  ): React.ReactNode => {
+    const info = angleInfo(c)
+    if (!info) return null
+    const off = c.offset ?? defaultOff
+    const n = 24
+    const pts: Vec2[] = []
+    for (let i = 0; i <= n; i++) {
+      const t = info.t1 + info.sweep * (i / n)
+      pts.push([info.X[0] + Math.cos(t) * off, info.X[1] + Math.sin(t) * off])
+    }
+    const mid = info.t1 + info.sweep / 2
+    const lp: Vec2 = [
+      info.X[0] + Math.cos(mid) * (off + fontSize * 0.9),
+      info.X[1] + Math.sin(mid) * (off + fontSize * 0.9),
+    ]
+    return (
+      <g key={key}>
+        <polyline
+          points={pts.map(([x, y]) => pt(x, y)).join(' ')}
+          fill="none"
+          stroke={color}
+          strokeWidth={0.75}
+          vectorEffect="non-scaling-stroke"
+        />
+        <text
+          x={lp[0]}
+          y={-lp[1]}
+          fontSize={fontSize}
+          fill={color}
+          textAnchor="middle"
+          dominantBaseline="middle"
+        >
+          {r1(value)}°
+        </text>
+      </g>
+    )
+  }
+
+  // Arc-tool live preview: the bowed segment at the current sagitta.
+  const arcPreview = (() => {
+    if (!arcDrag || Math.abs(arcDrag.sagitta) < 0.5) return null
+    const a = pos(arcDrag.a)
+    const b = pos(arcDrag.b)
+    const res = arcFromSagitta(a, b, arcDrag.sagitta)
+    if (!res) return null
+    return [a, ...arcPoints(res.center, a, b, res.ccw), b]
+  })()
+
+  // Radius-dimension placement preview (leader follows the cursor angle).
+  const radiusPlacePreview = (() => {
+    if (!placingRadius || !cursor) return null
+    const ctr = pos(placingRadius.c)
+    let r = 0
+    if (placingRadius.shape) {
+      const s = data.shapes.find((x) => x.id === placingRadius.shape)
+      r = s && s.kind === 'circle' ? s.r : 0
+    } else if (placingRadius.a && placingRadius.b) {
+      r = (distance(pos(placingRadius.a), ctr) + distance(pos(placingRadius.b), ctr)) / 2
+    }
+    if (r <= 0) return null
+    const ang = Math.atan2(cursor[1] - ctr[1], cursor[0] - ctr[0])
+    return {
+      c: placingRadius.c,
+      shape: placingRadius.shape,
+      a: placingRadius.a,
+      b: placingRadius.b,
+      value: r,
+      offset: ang,
+    }
+  })()
+
+  // Angle-dimension placement preview (dim arc follows the cursor distance).
+  const anglePlacePreview = (() => {
+    if (!placingAngle || !cursor) return null
+    const info = angleInfo(placingAngle)
+    if (!info) return null
+    const A = pos(placingAngle.a)
+    const B = pos(placingAngle.b)
+    const C = pos(placingAngle.c)
+    const D = pos(placingAngle.d)
+    const dd =
+      ((Math.atan2(D[1] - C[1], D[0] - C[0]) - Math.atan2(B[1] - A[1], B[0] - A[0])) * 180) /
+      Math.PI
+    const norm = ((dd % 360) + 360) % 360
+    const value = norm > 180 ? norm - 180 : norm
+    return {
+      ...placingAngle,
+      offset: Math.max(fontSize, distance(cursor, info.X)),
+      value,
+    }
+  })()
+
   const editPos = (() => {
     if (!editing) return null
     const c = data.constraints.find((x) => x.id === editing)
-    if (!c || c.kind !== 'distance') return null
-    const a = pos(c.a)
-    const b = pos(c.b)
-    const n = normal(a, b)
-    const off = c.offset ?? defaultOff
-    const mid: Vec2 = [(a[0] + b[0]) / 2 + n[0] * off, (a[1] + b[1]) / 2 + n[1] * off]
+    if (!c) return null
+    const mid = dimLabelModelPos(c)
+    if (!mid) return null
     // Reads the live SVG transform (a ref) to place the HTML edit box over the
     // dimension; intentionally a render-time DOM measurement.
     // eslint-disable-next-line react-hooks/refs
@@ -768,6 +1137,19 @@ export function SketchCanvas() {
           .map((s, i) => {
             const a = pos(s.a)
             const b = pos(s.b)
+            if (s.arc && data.points[s.arc.center]) {
+              const arcPts = [a, ...arcPoints(pos(s.arc.center), a, b, s.arc.ccw), b]
+              return (
+                <polyline
+                  key={i}
+                  points={arcPts.map(([x, y]) => pt(x, y)).join(' ')}
+                  fill="none"
+                  stroke="#ffd866"
+                  strokeWidth={3}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )
+            }
             return (
               <line
                 key={i}
@@ -782,18 +1164,14 @@ export function SketchCanvas() {
             )
           })}
 
-        {data.constraints.map((c) =>
-          c.kind === 'distance'
-            ? renderDim(
-                pos(c.a),
-                pos(c.b),
-                c.offset ?? defaultOff,
-                c.value,
-                c.id,
-                isSelConstraint(c.id) ? '#ffd866' : '#9fb4d8',
-              )
-            : null,
-        )}
+        {data.constraints.map((c) => {
+          const color = isSelConstraint(c.id) ? '#ffd866' : '#9fb4d8'
+          if (c.kind === 'distance')
+            return renderDim(pos(c.a), pos(c.b), c.offset ?? defaultOff, c.value, c.id, color)
+          if (c.kind === 'radius') return renderRadiusDim(c, color)
+          if (c.kind === 'angle') return renderAngleDim(c, c.value, c.id, color)
+          return null
+        })}
 
         {data.shapes.map((s) =>
           s.kind === 'circle' ? (
@@ -904,6 +1282,35 @@ export function SketchCanvas() {
             'place',
             '#ffd866',
           )}
+
+        {radiusPlacePreview &&
+          renderRadiusDim(
+            {
+              id: 'place-r',
+              kind: 'radius',
+              c: radiusPlacePreview.c,
+              ...(radiusPlacePreview.shape && { shape: radiusPlacePreview.shape }),
+              ...(radiusPlacePreview.a && { a: radiusPlacePreview.a }),
+              ...(radiusPlacePreview.b && { b: radiusPlacePreview.b }),
+              value: radiusPlacePreview.value,
+              offset: radiusPlacePreview.offset,
+            },
+            '#ffd866',
+          )}
+
+        {anglePlacePreview &&
+          renderAngleDim(anglePlacePreview, anglePlacePreview.value, 'place-a', '#ffd866')}
+
+        {arcPreview && (
+          <polyline
+            points={arcPreview.map(([x, y]) => pt(x, y)).join(' ')}
+            fill="none"
+            stroke="#ffd866"
+            strokeWidth={1.5}
+            strokeDasharray="4 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
 
         {previewRect && previewRect.w > 0 && (
           <path

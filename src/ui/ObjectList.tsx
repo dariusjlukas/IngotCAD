@@ -19,13 +19,51 @@ import {
   faBorderAll,
   faClone,
   faBoxOpen,
+  faBezierCurve,
+  faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import { useCadStore } from '../document/store'
 import type { DropPosition } from '../document/store'
 import type { CadDocument, CadNode, NodeId } from '../document/types'
 import { hasChildren } from '../document/types'
+import { useEvalWarningsStore, warningsForNode } from '../engine/evalWarningsStore'
+import { useFaceRefStatusStore } from '../document/faceRefStatusStore'
 import { openContextMenu, type ContextMenuEntry } from './contextMenuStore'
 import { objectMenuEntries } from './objectMenu'
+
+/** ⚠ on a face-derived plane / face-attached sketch whose source face drifted. */
+function StaleFaceBadge({ dependentKey }: { dependentKey: string }) {
+  const info = useFaceRefStatusStore((s) => s.stale[dependentKey])
+  if (!info) return null
+  return (
+    <span
+      className="text-danger"
+      title={info.status === 'moved' ? 'Source face moved' : 'Source face missing'}
+    >
+      <FontAwesomeIcon icon={faTriangleExclamation} className="h-3 w-3" />
+    </span>
+  )
+}
+
+/** ⚠ on nodes whose last evaluation reported problems (e.g. a lost edge pick),
+ *  or whose face-attached sketch lost its source face. */
+function NodeWarningBadge({ id }: { id: NodeId }) {
+  const byRoot = useEvalWarningsStore((s) => s.byRoot)
+  const staleFace = useFaceRefStatusStore((s) => s.stale[id])
+  const warnings = warningsForNode(byRoot, id)
+  if (warnings.length === 0 && !staleFace) return null
+  const titles = [
+    ...warnings.map((w) => w.message),
+    ...(staleFace
+      ? [staleFace.status === 'moved' ? 'Source face moved' : 'Source face missing']
+      : []),
+  ]
+  return (
+    <span className="text-danger" title={titles.join('\n')}>
+      <FontAwesomeIcon icon={faTriangleExclamation} className="h-3 w-3" />
+    </span>
+  )
+}
 
 const KIND_ICON: Record<CadNode['kind'], IconDefinition> = {
   primitive: faCube,
@@ -33,6 +71,7 @@ const KIND_ICON: Record<CadNode['kind'], IconDefinition> = {
   boolean: faShapes,
   pattern: faClone,
   shell: faBoxOpen,
+  edgeTreatment: faBezierCurve,
 }
 
 interface FlatRow {
@@ -193,6 +232,7 @@ function Row({
           hole
         </span>
       )}
+      <NodeWarningBadge id={node.id} />
       <button
         type="button"
         tabIndex={-1}
@@ -274,6 +314,7 @@ function PlaneSection() {
                 {p.name}
               </span>
             )}
+            <StaleFaceBadge dependentKey={id} />
             <button
               type="button"
               tabIndex={-1}

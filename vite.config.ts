@@ -42,6 +42,11 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['manifold-3d'],
   },
+  // The engine worker is a module worker; the default iife format breaks if the
+  // worker graph ever code-splits.
+  worker: {
+    format: 'es',
+  },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],

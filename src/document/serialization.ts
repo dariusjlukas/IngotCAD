@@ -68,12 +68,15 @@ export function deserializeDocument(text: string): CadDocument {
   })
 }
 
-/** Bring an older document up to the current schema. (No migrations yet.) */
+/** Bring an older document up to the current schema. */
 function migrate(doc: CadDocument): CadDocument {
   if (doc.schemaVersion > SCHEMA_VERSION) {
     throw new Error('This project was made with a newer version of Ingot.')
   }
-  // Future: step the document up one version at a time here.
+  // v1 → v2: sketch arcs, tangent/radius/angle constraints, edge treatments,
+  // and face provenance refs are all *additive* — a v1 document simply lacks
+  // them, so the step is an identity. The bump exists so v2 files (which an
+  // old build can't represent) are refused by the version gate above.
   doc.schemaVersion = SCHEMA_VERSION
   return doc
 }

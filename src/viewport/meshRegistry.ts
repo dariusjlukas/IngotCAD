@@ -17,6 +17,11 @@ export function registerMesh(id: NodeId, obj: THREE.Object3D | null): void {
   else registry.delete(id)
 }
 
+/** The rendered root mesh for a node id, if any (local-space geometry). */
+export function getMeshObject(id: NodeId): THREE.Object3D | undefined {
+  return registry.get(id)
+}
+
 /**
  * World-space AABB of every rendered (visible) root mesh, or null when nothing
  * is rendered. Uses the live three.js world matrices, so it reflects each root's

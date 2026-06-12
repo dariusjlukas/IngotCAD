@@ -14,6 +14,7 @@ import type {
   BooleanOp,
   CadDocument,
   CadNode,
+  EdgeTreatmentEntry,
   MeshAsset,
   NodeId,
   PatternMode,
@@ -352,6 +353,17 @@ export interface CadState {
   patternNodes: (ids: NodeId[], spec: PatternSpec) => NodeId | null
   /** Wrap the selected root object(s) in a hollow shell of the given wall. */
   shellNodes: (ids: NodeId[], thickness: number, openTop: boolean) => NodeId | null
+  /** Wrap the selected root object(s) in an (initially empty) edge chamfer/fillet. */
+  edgeTreatmentNodes: (ids: NodeId[]) => NodeId | null
+  /** Add a picked edge to an edgeTreatment node. */
+  addEdgeEntry: (id: NodeId, entry: Omit<EdgeTreatmentEntry, 'id'>) => void
+  /** Update one entry's kind/size. */
+  updateEdgeEntry: (
+    id: NodeId,
+    entryId: string,
+    patch: Partial<Pick<EdgeTreatmentEntry, 'kind' | 'size'>>,
+  ) => void
+  removeEdgeEntry: (id: NodeId, entryId: string) => void
   deleteNodes: (ids: NodeId[]) => void
   /** Deep-copy the selected subtree(s) as siblings, nudged + selected. */
   duplicateNodes: (ids: NodeId[]) => NodeId[]
@@ -777,6 +789,46 @@ export const useCadStore = create<CadState>()((set, get) => {
         transform: { ...IDENTITY_TRANSFORM },
       }))
     },
+
+    edgeTreatmentNodes: (ids) => {
+      const name = nextName('Chamfer/Fillet')
+      const color = PALETTE[get().counter % PALETTE.length]
+      return wrapRoots(ids, (id, childIds) => ({
+        id,
+        kind: 'edgeTreatment',
+        name,
+        entries: [],
+        childIds,
+        color,
+        visible: true,
+        role: 'solid',
+        transform: { ...IDENTITY_TRANSFORM },
+      }))
+    },
+
+    addEdgeEntry: (id, entry) =>
+      mutate((doc) => {
+        const node = doc.nodes[id]
+        if (node?.kind !== 'edgeTreatment') return
+        node.entries.push({ ...entry, id: nanoid(8) })
+      }),
+
+    updateEdgeEntry: (id, entryId, patch) =>
+      mutate((doc) => {
+        const node = doc.nodes[id]
+        if (node?.kind !== 'edgeTreatment') return
+        const entry = node.entries.find((e) => e.id === entryId)
+        if (!entry) return
+        if (patch.kind !== undefined) entry.kind = patch.kind
+        if (patch.size !== undefined) entry.size = Math.max(0.05, patch.size)
+      }),
+
+    removeEdgeEntry: (id, entryId) =>
+      mutate((doc) => {
+        const node = doc.nodes[id]
+        if (node?.kind !== 'edgeTreatment') return
+        node.entries = node.entries.filter((e) => e.id !== entryId)
+      }),
 
     ungroup: (id) => {
       let promoted: NodeId[] = []

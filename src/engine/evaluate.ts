@@ -26,6 +26,8 @@ import type {
 } from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
 import { EMPTY_MESH } from '../geometry/manifoldToThree'
+import { applyEdgeTreatments } from './edgeTreatment'
+import type { EvalWarning } from './protocol'
 import {
   axisRotationMatrix,
   isIdentityTransform,
@@ -35,6 +37,10 @@ import {
 } from '../geometry/transform'
 
 type Wasm = ManifoldToplevel
+
+/** Collector for non-fatal evaluation warnings (edge treatments that no longer
+ *  bind, etc.). Optional everywhere; defaults to dropping them. */
+export type WarnFn = (w: EvalWarning) => void
 
 interface RoledSolid {
   role: Role
@@ -263,14 +269,14 @@ function combineShell(
   return result
 }
 
-export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId): Manifold {
+export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId, warn?: WarnFn): Manifold {
   const node = doc.nodes[id]
   if (!node) throw new Error(`Unknown node: ${id}`)
   if (node.kind === 'primitive') return buildPrimitive(M, doc, node.params)
 
   const children: RoledSolid[] = node.childIds
     .filter((cid) => doc.nodes[cid])
-    .map((cid) => ({ role: doc.nodes[cid].role, solid: evaluate(M, doc, cid) }))
+    .map((cid) => ({ role: doc.nodes[cid].role, solid: evaluate(M, doc, cid, warn) }))
 
   if (children.length === 0) return emptySolid(M)
   const solids = children.map((c) => c.solid)
@@ -283,11 +289,16 @@ export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId): Manifold {
       return combinePattern(M, solids, node.spec)
     case 'shell':
       return combineShell(M, solids, node.thickness, node.openTop)
+    case 'edgeTreatment': {
+      // Honor solid/hole roles like a group, then cut the picked edges.
+      const base = combineGroup(M, children)
+      return applyEdgeTreatments(M, base, node.entries, (w) => warn?.({ ...w, nodeId: node.id }))
+    }
   }
 }
 
-export function evaluate(M: Wasm, doc: CadDocument, id: NodeId): Manifold {
-  const local = evaluateLocal(M, doc, id)
+export function evaluate(M: Wasm, doc: CadDocument, id: NodeId, warn?: WarnFn): Manifold {
+  const local = evaluateLocal(M, doc, id, warn)
   const tr = doc.nodes[id].transform
   if (isIdentityTransform(tr)) return local
   const result = local.transform(transformToMat4Array(tr) as unknown as Mat4)
@@ -317,10 +328,10 @@ function meshToRaw(mesh: {
 }
 
 /** Local-space raw geometry for rendering a root node. */
-export function computeMeshRaw(M: Wasm, doc: CadDocument, id: NodeId): RawMesh {
+export function computeMeshRaw(M: Wasm, doc: CadDocument, id: NodeId, warn?: WarnFn): RawMesh {
   let solid: Manifold | null = null
   try {
-    solid = evaluateLocal(M, doc, id)
+    solid = evaluateLocal(M, doc, id, warn)
     return meshToRaw(solid.getMesh())
   } catch (err) {
     console.error('computeMeshRaw failed', err)
@@ -331,10 +342,15 @@ export function computeMeshRaw(M: Wasm, doc: CadDocument, id: NodeId): RawMesh {
 }
 
 /** World-space union of the given roots, for export to STL/3MF. */
-export function computeExportRaw(M: Wasm, doc: CadDocument, rootIds: NodeId[]): RawMesh {
+export function computeExportRaw(
+  M: Wasm,
+  doc: CadDocument,
+  rootIds: NodeId[],
+  warn?: WarnFn,
+): RawMesh {
   let result: Manifold | null = null
   try {
-    const solids = rootIds.filter((id) => doc.nodes[id]).map((id) => evaluate(M, doc, id))
+    const solids = rootIds.filter((id) => doc.nodes[id]).map((id) => evaluate(M, doc, id, warn))
     result = unionAll(M, solids)
     return meshToRaw(result.getMesh())
   } catch (err) {

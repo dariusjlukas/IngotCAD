@@ -5,7 +5,7 @@
  * saved document or undo history.
  */
 import { create } from 'zustand'
-import type { Vec3 } from '../document/types'
+import type { FaceRef, Vec3 } from '../document/types'
 import { useCadStore } from '../document/store'
 
 export type PlaneTool = 'face' | 'threePoints' | 'edgeAngle'
@@ -16,8 +16,9 @@ interface PlaneBuilderState {
   points: Vec3[]
   start: (tool: PlaneTool) => void
   cancel: () => void
-  /** A face was clicked: build a plane parallel to it (offset 0). */
-  pickFace: (origin: Vec3, normal: Vec3) => void
+  /** A face was clicked: build a plane parallel to it (offset 0). `source`
+   *  records which face for stale detection. */
+  pickFace: (origin: Vec3, normal: Vec3, source?: FaceRef) => void
   /** A surface point was clicked: accumulate, and build once three are picked. */
   pickPoint: (point: Vec3) => void
   /** An edge was clicked: build a plane hinged on it (angle 0 = the picked face). */
@@ -30,8 +31,10 @@ export const usePlaneBuilderStore = create<PlaneBuilderState>((set, get) => ({
   start: (tool) => set({ tool, points: [] }),
   cancel: () => set({ tool: null, points: [] }),
 
-  pickFace: (origin, normal) => {
-    useCadStore.getState().addPlane({ kind: 'face', origin, normal, distance: 0 })
+  pickFace: (origin, normal, source) => {
+    useCadStore
+      .getState()
+      .addPlane({ kind: 'face', origin, normal, distance: 0, ...(source && { source }) })
     set({ tool: null, points: [] })
   },
   pickPoint: (point) => {

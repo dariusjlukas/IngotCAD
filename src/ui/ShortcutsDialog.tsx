@@ -30,6 +30,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ['W', 'Move'],
       ['E', 'Rotate'],
       ['R', 'Scale'],
+      ['M', 'Measure'],
     ],
   },
   {

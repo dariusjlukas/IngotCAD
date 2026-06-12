@@ -18,6 +18,8 @@ export interface ViewportTheme {
   buildVolume: string
   /** Build-volume wireframe when the model overflows the bed. */
   buildVolumeOver: string
+  /** Section-view cutting-plane outline + fill. */
+  sectionPlane: string
   hemiSky: string
   hemiGround: string
   hemiIntensity: number
@@ -37,6 +39,7 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
     selectionOutline: '#8ab4ff',
     buildVolume: '#5b6478',
     buildVolumeOver: '#ff6188',
+    sectionPlane: '#d8a657',
     hemiSky: '#ffffff',
     hemiGround: '#3a3f4b',
     hemiIntensity: 0.65,
@@ -54,6 +57,7 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
     selectionOutline: '#1d4ed8',
     buildVolume: '#94a0b4',
     buildVolumeOver: '#d11d52',
+    sectionPlane: '#b07d2b',
     hemiSky: '#ffffff',
     hemiGround: '#c9ccd2',
     hemiIntensity: 0.9,

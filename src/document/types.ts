@@ -57,6 +57,18 @@ export interface CornerTreatment {
   size: number
 }
 
+/**
+ * Marks a loop segment as a circular arc through `center`. The center is a real
+ * solver point owned by the loop (it participates in constraints and dragging);
+ * the radius is *derived* as |start − center| — never stored — so there is a
+ * single source of truth, exactly like corner fillets.
+ */
+export interface SegmentArc {
+  center: PointId
+  /** True when the arc sweeps counter-clockwise from the segment's start to its end. */
+  ccw: boolean
+}
+
 // `construction` geometry is reference-only: it participates in constraints and
 // snapping but is excluded from the extrude/revolve profile (see shapeContours).
 export type SketchShape =
@@ -67,6 +79,8 @@ export type SketchShape =
       construction?: boolean
       /** Per-corner fillet/chamfer, keyed by the corner's point id. */
       corners?: Record<PointId, CornerTreatment>
+      /** Per-segment arcs, keyed by the segment's START point id (segment i → i+1). */
+      arcs?: Record<PointId, SegmentArc>
     }
   | { id: ShapeId; kind: 'circle'; c: PointId; r: number; construction?: boolean }
 
@@ -78,6 +92,9 @@ export type ConstraintKind =
   | 'equal'
   | 'parallel'
   | 'perpendicular'
+  | 'tangent'
+  | 'radius'
+  | 'angle'
 
 export type Constraint =
   | { id: ConstraintId; kind: 'coincident'; a: PointId; b: PointId }
@@ -87,6 +104,42 @@ export type Constraint =
   | { id: ConstraintId; kind: 'equal'; a: PointId; b: PointId; c: PointId; d: PointId }
   | { id: ConstraintId; kind: 'parallel'; a: PointId; b: PointId; c: PointId; d: PointId }
   | { id: ConstraintId; kind: 'perpendicular'; a: PointId; b: PointId; c: PointId; d: PointId }
+  /**
+   * Line a–b tangent to a circle (`shape` = the circle, `c` = its center point)
+   * or to a loop arc (`shape` omitted, `c` = the arc's center point).
+   */
+  | { id: ConstraintId; kind: 'tangent'; a: PointId; b: PointId; c: PointId; shape?: ShapeId }
+  /**
+   * Radius dimension. `value` is ALWAYS the radius in mm (`diameter` only
+   * changes display/editing to 2r). Circle: `shape` set, a/b omitted. Arc:
+   * a/b are the arc's endpoints, driven to `value` from the center `c`.
+   * `offset` is the label's leader angle (radians, from the center).
+   */
+  | {
+      id: ConstraintId
+      kind: 'radius'
+      c: PointId
+      shape?: ShapeId
+      a?: PointId
+      b?: PointId
+      value: number
+      diameter?: boolean
+      offset?: number
+    }
+  /**
+   * Directed angle (degrees) from segment a–b to segment c–d. `offset` is the
+   * dimension-arc radius for label placement.
+   */
+  | {
+      id: ConstraintId
+      kind: 'angle'
+      a: PointId
+      b: PointId
+      c: PointId
+      d: PointId
+      value: number
+      offset?: number
+    }
 
 export interface SketchData {
   points: Record<PointId, SPoint>
@@ -107,10 +160,27 @@ export interface SketchPlane {
   n: Vec3
 }
 
+/**
+ * Provenance of a face-derived plane or face-attached sketch ("associativity
+ * lite"): which node the face was picked from, and the face's plane equation in
+ * that node's LOCAL space (dot(normal, p) = offset). Local space is deliberate:
+ * root transforms never rebuild geometry, so the local plane is untouched by
+ * pure moves — at check time it is composed with the source's CURRENT world
+ * transform and compared against the stored snapshot to detect drift. Purely a
+ * detection key; the snapshot stays the authority for what is rendered.
+ */
+export interface FaceRef {
+  nodeId: NodeId
+  normal: Vec3
+  offset: number
+}
+
 /** The editable source of a sketch-based solid: the sketch and the plane it's on. */
 export interface SketchSource {
   data: SketchData
   plane: SketchPlane
+  /** Set when the sketch was drawn on a picked face (stale detection). */
+  faceRef?: FaceRef
 }
 
 // ---------------------------------------------------------------------------
@@ -128,8 +198,9 @@ export interface SketchSource {
 export type PlaneDefinition =
   /** Parallel to a cardinal plane, shifted `distance` mm along its normal. */
   | { kind: 'offset'; base: PlaneKind; distance: number }
-  /** Parallel to a picked face (origin + outward normal), offset `distance` mm. */
-  | { kind: 'face'; origin: Vec3; normal: Vec3; distance: number }
+  /** Parallel to a picked face (origin + outward normal), offset `distance` mm.
+   *  `source` (optional) records which face, for stale detection + rebind. */
+  | { kind: 'face'; origin: Vec3; normal: Vec3; distance: number; source?: FaceRef }
   /** Through three picked points (a = origin, a→b = U, normal = (b−a)×(c−a)). */
   | { kind: 'threePoints'; a: Vec3; b: Vec3; c: Vec3 }
   /** Hinged about an edge: `refNormal` rotated `angleDeg` about the edge `axis`. */
@@ -262,10 +333,58 @@ export interface ShellNode extends BaseNode {
   childIds: NodeId[]
 }
 
-export type CadNode = PrimitiveNode | GroupNode | BooleanNode | PatternNode | ShellNode
+export type FeatureEdgeKind = 'line' | 'circle'
+
+/**
+ * Snapshot signature of a picked sharp edge, in the edgeTreatment node's LOCAL
+ * space (= the combined child geometry's space; the wrapper is created with an
+ * identity transform). The signature is only a MATCHING KEY: at evaluate time
+ * the edge is re-detected on the child's current mesh and matched tolerantly,
+ * so the treatment tracks param edits. An unmatched signature is skipped with
+ * a warning — never silently applied to the wrong edge.
+ */
+export interface EdgeSignature {
+  kind: FeatureEdgeKind
+  /** line: midpoint. circle: circle center. */
+  point: Vec3
+  /** line: unit direction. circle: unit axis. */
+  dir: Vec3
+  /** line: segment length. circle: circumference of the detected chain. */
+  length: number
+  /** circle only. */
+  radius?: number
+  /** Unit outward normals of the two faces adjacent to the edge. */
+  normals: [Vec3, Vec3]
+}
+
+export interface EdgeTreatmentEntry {
+  id: string
+  kind: 'chamfer' | 'fillet'
+  /** Chamfer setback / fillet radius, mm. */
+  size: number
+  edge: EdgeSignature
+}
+
+/**
+ * Chamfers/fillets selected sharp edges of its source subtree (convex straight
+ * and closed circular edges; built as boolean cut tools in the engine).
+ */
+export interface EdgeTreatmentNode extends BaseNode {
+  kind: 'edgeTreatment'
+  entries: EdgeTreatmentEntry[]
+  childIds: NodeId[]
+}
+
+export type CadNode =
+  | PrimitiveNode
+  | GroupNode
+  | BooleanNode
+  | PatternNode
+  | ShellNode
+  | EdgeTreatmentNode
 
 /** A node that contains other nodes. */
-export type ContainerNode = GroupNode | BooleanNode | PatternNode | ShellNode
+export type ContainerNode = GroupNode | BooleanNode | PatternNode | ShellNode | EdgeTreatmentNode
 
 /** Raw geometry for an imported mesh (e.g. STL), referenced by `mesh` primitives. */
 export interface MeshAsset {
@@ -289,7 +408,7 @@ export interface CadDocument {
   planeOrder: string[]
 }
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export function createEmptyDocument(): CadDocument {
   return {
@@ -309,6 +428,7 @@ export function hasChildren(node: CadNode): node is ContainerNode {
     node.kind === 'group' ||
     node.kind === 'boolean' ||
     node.kind === 'pattern' ||
-    node.kind === 'shell'
+    node.kind === 'shell' ||
+    node.kind === 'edgeTreatment'
   )
 }

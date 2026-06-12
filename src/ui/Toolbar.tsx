@@ -9,12 +9,17 @@ import {
   faBorderAll,
   faArrowPointer,
   faFont,
+  faRuler,
+  faScissors,
 } from '@fortawesome/free-solid-svg-icons'
 import { DEFAULT_PATTERN_SPEC, DEFAULT_SHELL_THICKNESS, useCadStore } from '../document/store'
 import { selectCanRedo, selectCanUndo, selectSingleSelected } from '../document/selectors'
 import { useViewportStore } from '../viewport/viewportStore'
 import type { ToolMode } from '../viewport/viewportStore'
 import { usePlaneBuilderStore } from '../viewport/planeBuilderStore'
+import { toggleMeasure, useMeasureStore } from '../viewport/measureStore'
+import { useSectionStore } from '../viewport/sectionStore'
+import { useEdgeTreatmentStore } from '../viewport/edgeTreatmentStore'
 import { useSketchStore } from '../sketch/sketchStore'
 import { textToContours } from '../text/font'
 import { openContextMenu } from './contextMenuStore'
@@ -73,6 +78,7 @@ export function Toolbar() {
   const ungroup = useCadStore((s) => s.ungroup)
   const patternNodes = useCadStore((s) => s.patternNodes)
   const shellNodes = useCadStore((s) => s.shellNodes)
+  const edgeTreatmentNodes = useCadStore((s) => s.edgeTreatmentNodes)
   const deleteNodes = useCadStore((s) => s.deleteNodes)
   const undo = useCadStore((s) => s.undo)
   const redo = useCadStore((s) => s.redo)
@@ -81,6 +87,16 @@ export function Toolbar() {
   const setTool = useViewportStore((s) => s.setTool)
   const openSketch = useSketchStore((s) => s.open)
   const startPlaneTool = usePlaneBuilderStore((s) => s.start)
+  const measureActive = useMeasureStore((s) => s.active)
+  const sectionEnabled = useSectionStore((s) => s.enabled)
+  const setSectionEnabled = useSectionStore((s) => s.setEnabled)
+
+  // Picking modes are mutually exclusive: starting a plane pick or a sketch
+  // ends an active measure session.
+  const startPlanePick = (tool: Parameters<typeof startPlaneTool>[0]) => {
+    useMeasureStore.getState().cancel()
+    startPlaneTool(tool)
+  }
 
   const openPlaneMenu = (e: MouseEvent) => {
     const r = e.currentTarget.getBoundingClientRect()
@@ -89,9 +105,9 @@ export function Toolbar() {
         label: 'Offset plane (from XY)',
         onSelect: () => addPlane({ kind: 'offset', base: 'xy', distance: 0 }),
       },
-      { label: 'Parallel to a face…', onSelect: () => startPlaneTool('face') },
-      { label: 'Through 3 points…', onSelect: () => startPlaneTool('threePoints') },
-      { label: 'At an angle about an edge…', onSelect: () => startPlaneTool('edgeAngle') },
+      { label: 'Parallel to a face…', onSelect: () => startPlanePick('face') },
+      { label: 'Through 3 points…', onSelect: () => startPlanePick('threePoints') },
+      { label: 'At an angle about an edge…', onSelect: () => startPlanePick('edgeAngle') },
     ])
   }
 
@@ -106,6 +122,24 @@ export function Toolbar() {
     } catch {
       toast.error('Could not load the text font.')
     }
+  }
+
+  // Wrap the selection (or reuse an already-selected chamfer/fillet node) and
+  // enter edge-picking mode.
+  const startEdgeTreatment = (kind: 'chamfer' | 'fillet') => {
+    useMeasureStore.getState().cancel()
+    const s = useCadStore.getState()
+    const single = s.selectedIds.length === 1 ? s.doc.nodes[s.selectedIds[0]] : null
+    const nodeId = single?.kind === 'edgeTreatment' ? single.id : edgeTreatmentNodes(s.selectedIds)
+    if (nodeId) useEdgeTreatmentStore.getState().start(nodeId, kind, 2)
+  }
+
+  const openEdgeMenu = (e: MouseEvent) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    openContextMenu(r.left, r.bottom + 4, [
+      { label: 'Chamfer edges…', onSelect: () => startEdgeTreatment('chamfer') },
+      { label: 'Fillet edges…', onSelect: () => startEdgeTreatment('fillet') },
+    ])
   }
 
   const openPatternMenu = (e: MouseEvent) => {
@@ -145,7 +179,13 @@ export function Toolbar() {
         <Btn onClick={() => addPrimitive('sphere')} title="Add a sphere">
           <FontAwesomeIcon icon={faCircle} fixedWidth /> Sphere
         </Btn>
-        <Btn onClick={() => openSketch()} title="Sketch a 2D profile and extrude it">
+        <Btn
+          onClick={() => {
+            useMeasureStore.getState().cancel()
+            openSketch()
+          }}
+          title="Sketch a 2D profile and extrude it"
+        >
           <FontAwesomeIcon icon={faPencil} fixedWidth /> Sketch
         </Btn>
         <Btn onClick={() => void handleAddText()} title="Add extruded 3D text">
@@ -165,6 +205,16 @@ export function Toolbar() {
         {modeBtn('translate', 'Move', 'W')}
         {modeBtn('rotate', 'Rotate', 'E')}
         {modeBtn('scale', 'Scale', 'R')}
+        <Btn onClick={toggleMeasure} active={measureActive} title="Measure (M)">
+          <FontAwesomeIcon icon={faRuler} fixedWidth /> Measure
+        </Btn>
+        <Btn
+          onClick={() => setSectionEnabled(!sectionEnabled)}
+          active={sectionEnabled}
+          title="Section view: clip the model with a plane"
+        >
+          <FontAwesomeIcon icon={faScissors} fixedWidth /> Section
+        </Btn>
       </Group>
 
       <Divider />
@@ -219,6 +269,13 @@ export function Toolbar() {
           title="Hollow the object to a wall (shell)"
         >
           Shell
+        </Btn>
+        <Btn
+          onClick={openEdgeMenu}
+          disabled={!hasSelection}
+          title="Chamfer or fillet the object's edges"
+        >
+          Chamfer ▾
         </Btn>
       </Group>
 

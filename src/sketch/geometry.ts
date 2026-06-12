@@ -148,6 +148,90 @@ export function cornerPoints(
   return out
 }
 
+/**
+ * The signed sweep (radians) of an arc from `start` to `end` about `center`:
+ * in (0, 2π] for CCW arcs, [−2π, 0) for CW arcs.
+ */
+export function arcSweep(center: Vec2, start: Vec2, end: Vec2, ccw: boolean): number {
+  const a1 = Math.atan2(start[1] - center[1], start[0] - center[0])
+  const a2 = Math.atan2(end[1] - center[1], end[0] - center[0])
+  let sweep = a2 - a1
+  if (ccw) {
+    while (sweep <= 0) sweep += 2 * Math.PI
+  } else {
+    while (sweep >= 0) sweep -= 2 * Math.PI
+  }
+  return sweep
+}
+
+/**
+ * Interior facet points of a circular arc (excludes both endpoints, so the
+ * result splices between them in a loop). Density follows the fillet
+ * convention: `segments` facets per 90° of sweep.
+ */
+export function arcPoints(
+  center: Vec2,
+  start: Vec2,
+  end: Vec2,
+  ccw: boolean,
+  segments = FILLET_SEGMENTS,
+): Vec2[] {
+  const r =
+    (Math.hypot(start[0] - center[0], start[1] - center[1]) +
+      Math.hypot(end[0] - center[0], end[1] - center[1])) /
+    2
+  if (r < 1e-6) return []
+  const a1 = Math.atan2(start[1] - center[1], start[0] - center[0])
+  const sweep = arcSweep(center, start, end, ccw)
+  const n = Math.max(2, Math.ceil((segments * Math.abs(sweep)) / (Math.PI / 2)))
+  const out: Vec2[] = []
+  for (let i = 1; i < n; i++) {
+    const ang = a1 + sweep * (i / n)
+    out.push([center[0] + Math.cos(ang) * r, center[1] + Math.sin(ang) * r])
+  }
+  return out
+}
+
+/**
+ * The arc through chord a→b with signed sagitta `s` (bulge height along the
+ * chord's LEFT normal; positive bulges left of a→b). Returns the circle center
+ * and sweep direction, or null when degenerate. Handles minor and major arcs
+ * (|s| beyond the semicircle keeps growing the bulge).
+ */
+export function arcFromSagitta(a: Vec2, b: Vec2, s: number): { center: Vec2; ccw: boolean } | null {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const L = Math.hypot(dx, dy)
+  if (L < 1e-6 || Math.abs(s) < 1e-6) return null
+  const nx = -dy / L
+  const ny = dx / L
+  const m: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  const r = (L * L) / 4 / (2 * Math.abs(s)) + Math.abs(s) / 2
+  const k = s - Math.sign(s) * r
+  // A bulge to the LEFT of a→b is traversed clockwise from a to b (and vice
+  // versa) — pinned by tests; getting this wrong mirrors every arc.
+  return { center: [m[0] + nx * k, m[1] + ny * k], ccw: s < 0 }
+}
+
+/** Distance from `p` to the arc (clamped to the arc's angular span). */
+export function distToArc(p: Vec2, center: Vec2, start: Vec2, end: Vec2, ccw: boolean): number {
+  const r =
+    (Math.hypot(start[0] - center[0], start[1] - center[1]) +
+      Math.hypot(end[0] - center[0], end[1] - center[1])) /
+    2
+  const a1 = Math.atan2(start[1] - center[1], start[0] - center[0])
+  const sweep = arcSweep(center, start, end, ccw)
+  const ap = Math.atan2(p[1] - center[1], p[0] - center[0])
+  // Angle of p past `start`, measured in the sweep direction, in [0, 2π).
+  let t = ccw ? ap - a1 : a1 - ap
+  while (t < 0) t += 2 * Math.PI
+  while (t >= 2 * Math.PI) t -= 2 * Math.PI
+  if (t <= Math.abs(sweep)) {
+    return Math.abs(Math.hypot(p[0] - center[0], p[1] - center[1]) - r)
+  }
+  return Math.min(distance(p, start), distance(p, end))
+}
+
 /** Center of the combined bounding box of all contours. */
 export function bboxCenter(contours: Vec2[][]): Vec2 {
   let minX = Infinity

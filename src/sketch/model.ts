@@ -11,13 +11,14 @@ import type {
   Constraint,
   ConstraintKind,
   PointId,
+  SegmentArc,
   ShapeId,
   SketchData,
   SketchShape,
   SPoint,
   Vec2,
 } from '../document/types'
-import { cornerPoints, ensureCCW, FILLET_SEGMENTS, makeCircle } from './geometry'
+import { arcPoints, cornerPoints, ensureCCW, FILLET_SEGMENTS, makeCircle } from './geometry'
 
 type LoopShape = Extract<SketchShape, { kind: 'loop' }>
 
@@ -60,7 +61,12 @@ export function constraintPoints(c: Constraint): PointId[] {
     case 'equal':
     case 'parallel':
     case 'perpendicular':
+    case 'angle':
       return [c.a, c.b, c.c, c.d]
+    case 'tangent':
+      return [c.a, c.b, c.c]
+    case 'radius':
+      return [c.c, ...(c.a ? [c.a] : []), ...(c.b ? [c.b] : [])]
   }
 }
 
@@ -72,10 +78,17 @@ const KIND_SHORT: Record<ConstraintKind, string> = {
   equal: '=',
   parallel: '∥',
   perpendicular: '⊥',
+  tangent: '◠',
+  radius: 'R',
+  angle: '∠',
 }
 
+const r2 = (n: number) => Math.round(n * 100) / 100
+
 export function constraintLabel(c: Constraint): string {
-  if (c.kind === 'distance') return `↔ ${Math.round(c.value * 100) / 100}`
+  if (c.kind === 'distance') return `↔ ${r2(c.value)}`
+  if (c.kind === 'radius') return c.diameter ? `⌀ ${r2(c.value * 2)}` : `R ${r2(c.value)}`
+  if (c.kind === 'angle') return `∠ ${r2(c.value)}°`
   return `${KIND_SHORT[c.kind]} ${c.kind}`
 }
 
@@ -90,10 +103,12 @@ export function loopOutline(data: SketchData, loop: LoopShape, segments = FILLET
     .filter((v): v is { id: PointId; p: SPoint } => Boolean(v.p))
   const n = verts.length
   const base = verts.map((v) => [v.p.x, v.p.y] as Vec2)
-  if (!loop.corners || n < 3) return base
+  if ((!loop.corners || n < 3) && !loop.arcs) return base
   const out: Vec2[] = []
   for (let i = 0; i < n; i++) {
-    const t = loop.corners[verts[i].id]
+    // A corner treatment is ignored next to an arc segment (the arc owns the
+    // corner's geometry) — also enforced at creation time, see canTreatCorner.
+    const t = n >= 3 && canTreatCorner(data, verts[i].id) ? loop.corners?.[verts[i].id] : undefined
     if (t && t.size > 0) {
       const prev = base[(i - 1 + n) % n]
       const next = base[(i + 1) % n]
@@ -101,8 +116,80 @@ export function loopOutline(data: SketchData, loop: LoopShape, segments = FILLET
     } else {
       out.push(base[i])
     }
+    // Expand an arc segment (from this vertex to the next) into facet points.
+    const arc = loop.arcs?.[verts[i].id]
+    const c = arc ? data.points[arc.center] : undefined
+    if (arc && c) {
+      out.push(...arcPoints([c.x, c.y], base[i], base[(i + 1) % n], arc.ccw, segments))
+    }
   }
   return out
+}
+
+/**
+ * The arc on the loop segment between points `a` and `b` (either order),
+ * if there is one. `key` is the segment's start point id (the `arcs` key).
+ */
+export function arcOfSegment(
+  data: SketchData,
+  a: PointId,
+  b: PointId,
+): { loop: LoopShape; key: PointId; arc: SegmentArc } | null {
+  const seg = findLoopSegment(data, a, b)
+  if (!seg) return null
+  const arc = seg.loop.arcs?.[seg.startPid]
+  return arc ? { loop: seg.loop, key: seg.startPid, arc } : null
+}
+
+/**
+ * Locate the loop segment between points `a` and `b` (either order) and
+ * resolve its LOOP-ORDER orientation (start → end).
+ */
+export function findLoopSegment(
+  data: SketchData,
+  a: PointId,
+  b: PointId,
+): { loop: LoopShape; startPid: PointId; endPid: PointId } | null {
+  for (const s of data.shapes) {
+    if (s.kind !== 'loop') continue
+    const n = s.pts.length
+    for (let i = 0; i < n; i++) {
+      const p = s.pts[i]
+      const q = s.pts[(i + 1) % n]
+      if ((p === a && q === b) || (p === b && q === a)) {
+        return { loop: s, startPid: p, endPid: q }
+      }
+    }
+  }
+  return null
+}
+
+/** Derived radius of a loop arc: mean distance of its endpoints from the center. */
+export function arcRadius(data: SketchData, loop: LoopShape, key: PointId): number {
+  const arc = loop.arcs?.[key]
+  if (!arc) return 0
+  const i = loop.pts.indexOf(key)
+  if (i < 0) return 0
+  const a = data.points[key]
+  const b = data.points[loop.pts[(i + 1) % loop.pts.length]]
+  const c = data.points[arc.center]
+  if (!a || !b || !c) return 0
+  return (Math.hypot(a.x - c.x, a.y - c.y) + Math.hypot(b.x - c.x, b.y - c.y)) / 2
+}
+
+/**
+ * Whether the loop corner at `pid` may take a fillet/chamfer: corners adjacent
+ * to an arc segment (as its start or end) cannot — the arc owns that geometry.
+ */
+export function canTreatCorner(data: SketchData, pid: PointId): boolean {
+  for (const s of data.shapes) {
+    if (s.kind !== 'loop' || !s.arcs) continue
+    const i = s.pts.indexOf(pid)
+    if (i < 0) continue
+    const prev = s.pts[(i - 1 + s.pts.length) % s.pts.length]
+    if (s.arcs[pid] || s.arcs[prev]) return false
+  }
+  return true
 }
 
 /** Neighbour positions of a loop corner (cyclic); null for non-corner points. */
@@ -145,6 +232,8 @@ export function pointPos(data: SketchData, id: PointId): Vec2 {
 export function shapeIdOfPoint(data: SketchData, pid: PointId): ShapeId | null {
   for (const s of data.shapes) {
     if (s.kind === 'loop' && s.pts.includes(pid)) return s.id
+    if (s.kind === 'loop' && s.arcs && Object.values(s.arcs).some((a) => a.center === pid))
+      return s.id
     if (s.kind === 'circle' && s.c === pid) return s.id
   }
   return null
@@ -155,6 +244,10 @@ export function removeShapeFromData(data: SketchData, shapeId: ShapeId): void {
   const shape = data.shapes.find((s) => s.id === shapeId)
   if (!shape) return
   const pts = new Set<PointId>(shape.kind === 'loop' ? shape.pts : [shape.c])
+  // A loop also owns its arc centers.
+  if (shape.kind === 'loop' && shape.arcs) {
+    for (const arc of Object.values(shape.arcs)) pts.add(arc.center)
+  }
   data.shapes = data.shapes.filter((s) => s.id !== shapeId)
   for (const id of pts) delete data.points[id]
   data.constraints = data.constraints.filter((c) => !constraintPoints(c).some((p) => pts.has(p)))
