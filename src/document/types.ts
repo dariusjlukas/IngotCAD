@@ -366,8 +366,9 @@ export interface EdgeTreatmentEntry {
 }
 
 /**
- * Chamfers/fillets selected sharp edges of its source subtree (convex straight
- * and closed circular edges; built as boolean cut tools in the engine).
+ * Chamfers/fillets selected sharp edges of its source subtree (straight and
+ * closed circular edges; convex edges are cut, concave edges filled — both
+ * built as boolean tools in the engine).
  */
 export interface EdgeTreatmentNode extends BaseNode {
   kind: 'edgeTreatment'
@@ -393,6 +394,12 @@ export interface MeshAsset {
   index: Uint32Array
 }
 
+/** A named document parameter; `expr` may reference other variables. */
+export interface DocVariable {
+  name: string
+  expr: string
+}
+
 export interface CadDocument {
   schemaVersion: number
   units: 'mm'
@@ -406,6 +413,15 @@ export interface CadDocument {
   planes: Record<string, ConstructionPlane>
   /** Construction-plane id order, for listing in the outliner. */
   planeOrder: string[]
+  /** Named parameters ("wall = 2.4") usable in dimension fields. */
+  variables: DocVariable[]
+  /**
+   * Expression bindings on numeric node fields, keyed `nodeId:path` (e.g.
+   * "abc:params.size.0"). The bound field still stores a plain NUMBER — the
+   * geometry pipeline never sees expressions — and editing a variable rewrites
+   * every bound number through one undoable mutation.
+   */
+  bindings: Record<string, string>
 }
 
 export const SCHEMA_VERSION = 2
@@ -420,6 +436,8 @@ export function createEmptyDocument(): CadDocument {
     featureOrder: [],
     planes: {},
     planeOrder: [],
+    variables: [],
+    bindings: {},
   }
 }
 

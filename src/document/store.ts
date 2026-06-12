@@ -31,6 +31,8 @@ import type {
 import { createEmptyDocument, hasChildren, IDENTITY_TRANSFORM } from './types'
 import { transformToMatrix4, matrix4ToTransform } from '../geometry/transform'
 import { bakeScaleIntoParams } from './scaleBake'
+import { applyAllBindings, bindingKey, pruneBindings, setByPath } from './bindings'
+import { evaluateExpression, isValidName, resolveVariables } from './expressions'
 import { cleanContours } from '../sketch/geometry'
 
 const HISTORY_LIMIT = 100
@@ -377,6 +379,21 @@ export interface CadState {
   isolateNodes: (ids: NodeId[]) => void
   /** Make every root node visible again. */
   showAllNodes: () => void
+
+  // variables & expression bindings
+  /**
+   * Add or update a named document variable. Every bound field re-evaluates in
+   * the same undoable mutation. Returns false (no mutation) for invalid names.
+   */
+  setVariable: (name: string, expr: string) => boolean
+  removeVariable: (name: string) => void
+  /**
+   * Bind a numeric node field (dot path, e.g. "params.height") to an
+   * expression, or clear the binding (expr = null, optionally writing
+   * `plainValue` in the same step). Returns false when the expression doesn't
+   * evaluate or the path isn't a numeric field — nothing is mutated then.
+   */
+  setFieldBinding: (id: NodeId, path: string, expr: string | null, plainValue?: number) => boolean
 
   // node edits
   transformNode: (id: NodeId, transform: Transform) => void
@@ -790,6 +807,60 @@ export const useCadStore = create<CadState>()((set, get) => {
       }))
     },
 
+    setVariable: (name, expr) => {
+      if (!isValidName(name)) return false
+      mutate((doc) => {
+        const existing = doc.variables.find((v) => v.name === name)
+        if (existing) existing.expr = expr
+        else doc.variables.push({ name, expr })
+        applyAllBindings(doc)
+      })
+      return true
+    },
+
+    removeVariable: (name) =>
+      mutate((doc) => {
+        doc.variables = doc.variables.filter((v) => v.name !== name)
+        // Bindings referencing the removed variable stop evaluating and keep
+        // their last number (applyAllBindings skips broken expressions).
+        applyAllBindings(doc)
+      }),
+
+    setFieldBinding: (id, path, expr, plainValue) => {
+      const doc = get().doc
+      const node = doc.nodes[id]
+      if (!node) return false
+      const key = bindingKey(id, path)
+      if (expr === null) {
+        if (!(key in doc.bindings) && plainValue === undefined) return true
+        mutate((d) => {
+          delete d.bindings[key]
+          const n = d.nodes[id]
+          if (n && plainValue !== undefined) setByPath(n, path, plainValue)
+        })
+        return true
+      }
+      // Validate against the live doc BEFORE mutating, so a bad expression
+      // never pushes a no-op undo entry.
+      const { values } = resolveVariables(doc.variables)
+      let value: number
+      try {
+        value = evaluateExpression(expr, values)
+      } catch {
+        return false
+      }
+      let applied = false
+      mutate((d) => {
+        const n = d.nodes[id]
+        if (!n) return
+        if (setByPath(n, path, value)) {
+          d.bindings[key] = expr
+          applied = true
+        }
+      })
+      return applied
+    },
+
     edgeTreatmentNodes: (ids) => {
       const name = nextName('Chamfer/Fillet')
       const color = PALETTE[get().counter % PALETTE.length]
@@ -860,6 +931,7 @@ export const useCadStore = create<CadState>()((set, get) => {
           if (hasChildren(node)) node.childIds = node.childIds.filter((c) => !toDelete.has(c))
         }
         cleanupEmptyContainers(doc)
+        pruneBindings(doc, toDelete)
       })
       set((state) => ({ selectedIds: state.selectedIds.filter((id) => state.doc.nodes[id]) }))
     },

@@ -4,7 +4,14 @@
  * arrays. `schemaVersion` is the hook for future migrations.
  */
 import { SCHEMA_VERSION } from './types'
-import type { CadDocument, CadNode, ConstructionPlane, MeshAsset, NodeId } from './types'
+import type {
+  CadDocument,
+  CadNode,
+  ConstructionPlane,
+  DocVariable,
+  MeshAsset,
+  NodeId,
+} from './types'
 
 interface SerializedAsset {
   position: number[]
@@ -20,6 +27,8 @@ interface SerializedDocument {
   featureOrder?: NodeId[]
   planes?: Record<string, ConstructionPlane>
   planeOrder?: string[]
+  variables?: DocVariable[]
+  bindings?: Record<string, string>
 }
 
 export function serializeDocument(doc: CadDocument): string {
@@ -36,6 +45,8 @@ export function serializeDocument(doc: CadDocument): string {
     featureOrder: doc.featureOrder,
     planes: doc.planes,
     planeOrder: doc.planeOrder,
+    variables: doc.variables,
+    bindings: doc.bindings,
   }
   return JSON.stringify(payload)
 }
@@ -65,6 +76,9 @@ export function deserializeDocument(text: string): CadDocument {
     // Construction planes were added later; default to none.
     planes: data.planes ?? {},
     planeOrder: data.planeOrder ?? [],
+    // Variables/bindings were added later (v2); default to none.
+    variables: data.variables ?? [],
+    bindings: data.bindings ?? {},
   })
 }
 

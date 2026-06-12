@@ -21,7 +21,7 @@ export interface WireDocument extends Omit<CadDocument, 'assets'> {
 /** Non-fatal problems found while evaluating (e.g. an edge treatment whose
  * picked edge no longer exists). Carried on every result so the UI can badge
  * the offending nodes. */
-export type EvalWarningCode = 'edge-unmatched' | 'edge-concave-unsupported' | 'edge-too-large'
+export type EvalWarningCode = 'edge-unmatched' | 'edge-too-large'
 
 export interface EvalWarning {
   nodeId: NodeId

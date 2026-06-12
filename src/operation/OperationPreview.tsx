@@ -157,6 +157,8 @@ function usePreviewGeometry(pending: PendingOp | null): PreviewGeo {
         featureOrder: [solid.id],
         planes: {},
         planeOrder: [],
+        variables: [],
+        bindings: {},
       }
       evalId = solid.id
     }

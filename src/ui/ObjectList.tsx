@@ -5,7 +5,7 @@
  * Rows are rendered from a flattened (depth-tagged) list so range-select and
  * drag math have a stable visual order; the tree shape comes from indentation.
  */
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
@@ -28,6 +28,8 @@ import type { CadDocument, CadNode, NodeId } from '../document/types'
 import { hasChildren } from '../document/types'
 import { useEvalWarningsStore, warningsForNode } from '../engine/evalWarningsStore'
 import { useFaceRefStatusStore } from '../document/faceRefStatusStore'
+import { resolveVariables } from '../document/expressions'
+import { toast } from './toastStore'
 import { openContextMenu, type ContextMenuEntry } from './contextMenuStore'
 import { objectMenuEntries } from './objectMenu'
 
@@ -246,6 +248,139 @@ function Row({
         <FontAwesomeIcon icon={node.visible ? faEye : faEyeSlash} fixedWidth />
       </button>
     </div>
+  )
+}
+
+/**
+ * Document variables ("wall = 2.4"), below the tree. Expressions may reference
+ * other variables; any dimension field accepts them (e.g. type "wall * 2" into
+ * a box size). Editing a value here rewrites every bound field in one undo step.
+ */
+function VariablesSection() {
+  const variables = useCadStore((s) => s.doc.variables)
+  const setVariable = useCadStore((s) => s.setVariable)
+  const removeVariable = useCadStore((s) => s.removeVariable)
+  const [newName, setNewName] = useState('')
+  const [newExpr, setNewExpr] = useState('')
+
+  const { values, errors } = resolveVariables(variables)
+
+  const add = () => {
+    const name = newName.trim()
+    if (!name) return
+    if (variables.some((v) => v.name === name)) {
+      toast.error(`"${name}" already exists.`)
+      return
+    }
+    if (!setVariable(name, newExpr.trim() || '0')) {
+      toast.error('Variable names must start with a letter (and not shadow pi/sin/…).')
+      return
+    }
+    setNewName('')
+    setNewExpr('')
+  }
+
+  return (
+    <div className="mt-1 border-t border-line pt-1">
+      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-fg-faint">
+        Variables
+      </div>
+      {variables.map((v) => {
+        const error = errors[v.name]
+        return (
+          <div key={v.name} className="group flex items-center gap-1 py-0.5 pr-1.5 pl-2 text-sm">
+            <span className="w-20 shrink-0 truncate font-mono text-xs text-fg" title={v.name}>
+              {v.name}
+            </span>
+            <VariableExprInput
+              expr={v.expr}
+              onCommit={(expr) => setVariable(v.name, expr)}
+              error={error}
+            />
+            <span
+              className={
+                'w-12 shrink-0 text-right text-xs ' + (error ? 'text-danger' : 'text-fg-faint')
+              }
+              title={error}
+            >
+              {error ? '⚠' : Math.round((values[v.name] ?? 0) * 1000) / 1000}
+            </span>
+            <button
+              type="button"
+              onClick={() => removeVariable(v.name)}
+              className="shrink-0 px-0.5 text-fg-faint opacity-0 group-hover:opacity-100 hover:text-danger"
+              title="Delete variable (bound fields keep their current value)"
+            >
+              ×
+            </button>
+          </div>
+        )
+      })}
+      <div className="flex items-center gap-1 py-0.5 pr-1.5 pl-2">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="name"
+          className="w-20 shrink-0 rounded bg-elevated px-1 py-0.5 font-mono text-xs text-fg-strong outline-none focus:ring-1 focus:ring-accent-ring"
+        />
+        <input
+          value={newExpr}
+          onChange={(e) => setNewExpr(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') add()
+          }}
+          placeholder="value or expression"
+          className="min-w-0 flex-1 rounded bg-elevated px-1 py-0.5 font-mono text-xs text-fg-strong outline-none focus:ring-1 focus:ring-accent-ring"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={newName.trim() === ''}
+          className="shrink-0 rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-elevated disabled:opacity-30"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Inline expression editor for one variable (commit on blur/Enter). */
+function VariableExprInput({
+  expr,
+  onCommit,
+  error,
+}: {
+  expr: string
+  onCommit: (expr: string) => void
+  error?: string
+}) {
+  const [text, setText] = useState(expr)
+  const focused = useRef(false)
+  useEffect(() => {
+    if (!focused.current) setText(expr)
+  }, [expr])
+  return (
+    <input
+      value={text}
+      onFocus={() => {
+        focused.current = true
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        focused.current = false
+        const t = text.trim()
+        if (t && t !== expr) onCommit(t)
+        else setText(expr)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+      }}
+      className={
+        'min-w-0 flex-1 rounded bg-elevated px-1 py-0.5 font-mono text-xs outline-none focus:ring-1 focus:ring-accent-ring ' +
+        (error ? 'text-danger' : 'text-fg-strong')
+      }
+    />
   )
 }
 
@@ -481,6 +616,7 @@ export function ObjectList({ width }: { width: number }) {
           })
         )}
         <PlaneSection />
+        <VariablesSection />
       </div>
     </aside>
   )

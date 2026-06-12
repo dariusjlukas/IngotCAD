@@ -252,4 +252,94 @@ describe('edgeTreatment evaluation', () => {
     expect(match).not.toBeNull()
     expect(match!.edge.kind).toBe('line')
   })
+
+  // L-shape (20³ box minus the x>0 ∧ y>0 quadrant): the interior vertical edge
+  // at (0,0), length 20, is concave. Base volume = 8000 − 10·10·20 = 6000.
+  function lShapeParts(): { nodes: Record<string, CadNode>; childIds: string[] } {
+    return {
+      nodes: {
+        a: prim('a', { type: 'box', size: [20, 20, 20] }),
+        b: {
+          ...prim('b', { type: 'box', size: [10, 10, 20.2] }),
+          transform: { ...IDENTITY_TRANSFORM, position: [5, 5, 0] },
+          role: 'hole' as const,
+        },
+      },
+      childIds: ['a', 'b'],
+    }
+  }
+
+  function concaveEdgeSignature(): EdgeSignature {
+    const doc = createEmptyDocument()
+    const parts = lShapeParts()
+    Object.assign(doc.nodes, parts.nodes)
+    doc.nodes.g = {
+      id: 'g',
+      kind: 'group',
+      name: 'g',
+      childIds: parts.childIds,
+      color: '#fff',
+      visible: true,
+      role: 'solid',
+      transform: { ...IDENTITY_TRANSFORM },
+    }
+    doc.rootIds = ['g']
+    const solid = evaluateLocal(M, doc, 'g')
+    const mesh = solid.getMesh()
+    const edges = detectFeatureEdges({ position: mesh.vertProperties, index: mesh.triVerts })
+    solid.delete()
+    const target = edges.find(
+      (e) =>
+        e.kind === 'line' &&
+        !e.convex &&
+        Math.abs(e.signature.point[0]) < 1e-3 &&
+        Math.abs(e.signature.point[1]) < 1e-3,
+    )
+    expect(target).toBeDefined()
+    return target!.signature
+  }
+
+  function docWithLTreatment(entries: EdgeTreatmentEntry[]): { doc: CadDocument; id: string } {
+    const doc = createEmptyDocument()
+    const parts = lShapeParts()
+    Object.assign(doc.nodes, parts.nodes)
+    doc.nodes.et = {
+      id: 'et',
+      kind: 'edgeTreatment',
+      name: 'Chamfer/Fillet',
+      entries,
+      childIds: parts.childIds,
+      color: '#fff',
+      visible: true,
+      role: 'solid',
+      transform: { ...IDENTITY_TRANSFORM },
+    }
+    doc.rootIds = ['et']
+    return { doc, id: 'et' }
+  }
+
+  it('concave chamfer fills the inside corner with s²/2·L of material', () => {
+    const s = 3
+    const sig = concaveEdgeSignature()
+    const { doc, id } = docWithLTreatment([{ id: 'e1', kind: 'chamfer', size: s, edge: sig }])
+    const warnings: EvalWarning[] = []
+    const solid = evaluateLocal(M, doc, id, (w) => warnings.push(w))
+    const volume = solid.volume()
+    solid.delete()
+    expect(warnings).toHaveLength(0)
+    expect(volume).toBeCloseTo(6000 + (s * s * 20) / 2, 0)
+  })
+
+  it('concave fillet fills the inside corner with r²(1−π/4)·L of material', () => {
+    const r = 4
+    const sig = concaveEdgeSignature()
+    const { doc, id } = docWithLTreatment([{ id: 'e1', kind: 'fillet', size: r, edge: sig }])
+    const warnings: EvalWarning[] = []
+    const solid = evaluateLocal(M, doc, id, (w) => warnings.push(w))
+    const volume = solid.volume()
+    solid.delete()
+    expect(warnings).toHaveLength(0)
+    const expected = 6000 + r * r * (1 - Math.PI / 4) * 20
+    expect(Math.abs(volume - expected) / expected).toBeLessThan(0.01)
+  })
 })

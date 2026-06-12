@@ -1,14 +1,18 @@
 /**
  * Edge chamfer/fillet construction: re-detect the sharp edges of the evaluated
- * child solid, match each stored entry's signature, and subtract a per-edge cut
- * tool (a wedge prism for chamfers; wedge-minus-tangent-cylinder for fillets;
- * the revolved equivalents for closed circular edges like cylinder rims).
+ * child solid, match each stored entry's signature, and apply a per-edge tool
+ * (a wedge prism for chamfers; wedge-minus-tangent-cylinder for fillets; the
+ * revolved equivalents for closed circular edges like cylinder rims). Convex
+ * edges SUBTRACT their tool (material is removed at an outside corner);
+ * concave edges UNION the mirrored tool (an inside corner is filled) — the 2D
+ * profile construction is identical, only the tangent orientation, apex side,
+ * and boolean op flip.
  *
- * v1 scope: CONVEX edges only, straight + closed circular. The cut tool is
- * always built from the freshly DETECTED edge — the signature is only the
- * matching key — so treatments track the child's current geometry. Limitations
- * (documented): square tool ends leave a small un-blended notch where two
- * treated edges meet (no corner patches), and concave edges warn + skip.
+ * Scope: straight + closed circular edges. The tool is always built from the
+ * freshly DETECTED edge — the signature is only the matching key — so
+ * treatments track the child's current geometry. Limitation (documented):
+ * square tool ends leave a small un-blended notch where two treated edges
+ * meet (no corner patches).
  */
 import type { CrossSection, Manifold, ManifoldToplevel, Mat4 } from 'manifold-3d'
 import type { EdgeTreatmentEntry, Vec2, Vec3 } from '../document/types'
@@ -60,19 +64,25 @@ interface EdgeCrossFrame {
   /** In-face tangents at the edge (each points away from the edge, into its face). */
   t1: Vec3
   t2: Vec3
-  /** Outward bisector (out of the material at a convex edge). */
+  /** Bisector of the face normals: always points AWAY from the material at the edge. */
   bOut: Vec3
-  /** Inward bisector between the faces (into the material). */
+  /** Bisector between the in-face tangents: for a convex edge it points into the
+   *  material; for a concave edge into the cavity (where the fillet circle sits). */
   bIn: Vec3
 }
 
-/** Cross-section frame at an edge with adjacent normals n1/n2 and tangent d. */
-function edgeFrame(n1: Vec3, n2: Vec3, d: Vec3): EdgeCrossFrame | null {
+/**
+ * Cross-section frame at an edge with adjacent normals n1/n2 and tangent d.
+ * The tangent sign-fix depends on convexity: at a convex edge each face lies on
+ * the NEGATIVE side of the other face's normal; at a concave (inside) edge each
+ * face lies on the POSITIVE side.
+ */
+function edgeFrame(n1: Vec3, n2: Vec3, d: Vec3, convex: boolean): EdgeCrossFrame | null {
   let t1 = normalize(cross(n1, d))
   let t2 = normalize(cross(n2, d))
-  // Sign-fix: each tangent points into its own face, away from the other face.
-  if (dot(t1, n2) > 0) t1 = scale(t1, -1)
-  if (dot(t2, n1) > 0) t2 = scale(t2, -1)
+  const sign = convex ? 1 : -1
+  if (sign * dot(t1, n2) > 0) t1 = scale(t1, -1)
+  if (sign * dot(t2, n1) > 0) t2 = scale(t2, -1)
   if (norm(add(t1, t2)) < 1e-6 || norm(add(n1, n2)) < 1e-6) return null
   return { t1, t2, bOut: normalize(add(n1, n2)), bIn: normalize(add(t1, t2)) }
 }
@@ -89,13 +99,18 @@ function cutProfile2D(
   kind: 'chamfer' | 'fillet',
   size: number,
   f: EdgeCrossFrame,
+  convex: boolean,
   to2d: (v: Vec3) => Vec2,
   at: Vec2,
 ): CrossSection | null {
   const t1 = to2d(f.t1)
   const t2 = to2d(f.t2)
   const out = to2d(f.bOut)
-  const apex: Vec2 = [at[0] + out[0] * APEX_EPSILON, at[1] + out[1] * APEX_EPSILON]
+  // The apex sits exactly on the edge; nudge it past the body surface so the
+  // boolean never sees a coincident face. A subtract tool (convex) pokes OUT of
+  // the material; a union tool (concave) overlaps INTO it.
+  const apexSign = convex ? APEX_EPSILON : -APEX_EPSILON
+  const apex: Vec2 = [at[0] + out[0] * apexSign, at[1] + out[1] * apexSign]
 
   if (kind === 'chamfer') {
     const tri: Vec2[] = [
@@ -140,13 +155,13 @@ function lineTool(
   const length = norm(sub(edge.b, edge.a))
   if (length < 1e-6) return null
   const d = normalize(sub(edge.b, edge.a))
-  const f = edgeFrame(edge.normals[0], edge.normals[1], d)
+  const f = edgeFrame(edge.normals[0], edge.normals[1], d, edge.convex)
   if (!f) return null
   // Right-handed frame (u, v, d): u × v = d.
   const u = f.t1
   const v = normalize(cross(d, f.t1))
   const to2d = (x: Vec3): Vec2 => [dot(x, u), dot(x, v)]
-  const profile = cutProfile2D(M, kind, size, f, to2d, [0, 0])
+  const profile = cutProfile2D(M, kind, size, f, edge.convex, to2d, [0, 0])
   if (!profile) return null
   const prism = profile.extrude(length, 0, 0, undefined, false)
   profile.delete()
@@ -170,10 +185,10 @@ function circleTool(
   const rho = normalize(sub(S, edge.center))
   const zhat = edge.axis
   const d = normalize(cross(zhat, rho)) // circle tangent at S
-  const f = edgeFrame(edge.normals[0], edge.normals[1], d)
+  const f = edgeFrame(edge.normals[0], edge.normals[1], d, edge.convex)
   if (!f) return null
   const to2d = (x: Vec3): Vec2 => [dot(x, rho), dot(x, zhat)]
-  const profile = cutProfile2D(M, kind, size, f, to2d, [R, 0])
+  const profile = cutProfile2D(M, kind, size, f, edge.convex, to2d, [R, 0])
   if (!profile) return null
   // Revolve about the cross-section's Y axis → a solid around local Z.
   const solid = profile.revolve(FILLET_SEGMENTS, 360)
@@ -213,7 +228,8 @@ export function applyEdgeTreatments(
   }
   const detected = detectFeatureEdges({ position, index: triVerts })
 
-  const tools: Manifold[] = []
+  const cutTools: Manifold[] = [] // convex edges: material removed
+  const fillTools: Manifold[] = [] // concave edges: material added
   for (const entry of entries) {
     const match = matchEdge(entry.edge, detected)
     if (!match) {
@@ -221,14 +237,6 @@ export function applyEdgeTreatments(
         code: 'edge-unmatched',
         entryId: entry.id,
         message: 'The picked edge no longer exists on this shape; the treatment was skipped.',
-      })
-      continue
-    }
-    if (!match.edge.convex) {
-      warn({
-        code: 'edge-concave-unsupported',
-        entryId: entry.id,
-        message: 'Concave edges are not supported yet; the treatment was skipped.',
       })
       continue
     }
@@ -244,14 +252,32 @@ export function applyEdgeTreatments(
       })
       continue
     }
-    tools.push(tool)
+    ;(match.edge.convex ? cutTools : fillTools).push(tool)
   }
 
-  if (tools.length === 0) return base
-  const cut = tools.length === 1 ? tools[0] : M.Manifold.union(tools)
-  if (tools.length > 1) tools.forEach((t) => t.delete())
-  const result = base.subtract(cut)
-  cut.delete()
-  base.delete()
+  if (cutTools.length === 0 && fillTools.length === 0) return base
+
+  const combine = (tools: Manifold[]): Manifold => {
+    if (tools.length === 1) return tools[0]
+    const u = M.Manifold.union(tools)
+    tools.forEach((t) => t.delete())
+    return u
+  }
+
+  let result = base
+  if (cutTools.length > 0) {
+    const cut = combine(cutTools)
+    const next = result.subtract(cut)
+    cut.delete()
+    result.delete()
+    result = next
+  }
+  if (fillTools.length > 0) {
+    const fill = combine(fillTools)
+    const next = result.add(fill)
+    fill.delete()
+    result.delete()
+    result = next
+  }
   return result
 }

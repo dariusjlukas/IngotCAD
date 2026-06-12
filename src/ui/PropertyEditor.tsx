@@ -21,6 +21,7 @@ import { useEdgeTreatmentStore } from '../viewport/edgeTreatmentStore'
 import { useFaceRefStatusStore } from '../document/faceRefStatusStore'
 import type { StaleFaceInfo } from '../document/faceRefStatusStore'
 import { NumberField, Vec3Field } from './NumberField'
+import { ExprField, ExprVec3Field } from './ExprField'
 
 const PLANE_KIND_LABEL: Record<PlaneDefinition['kind'], string> = {
   offset: 'Offset from a cardinal plane',
@@ -147,12 +148,13 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
   switch (params.type) {
     case 'box':
       return (
-        <Vec3Field
+        <ExprVec3Field
           label="Size (mm)"
+          nodeId={node.id}
+          basePath="params.size"
           value={params.size}
           min={0.1}
           step={1}
-          live
           onCommit={(size) => update({ ...params, size })}
         />
       )
@@ -160,26 +162,29 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
       return (
         <div className="space-y-1.5">
           <Field label="Height">
-            <NumberField
+            <ExprField
+              nodeId={node.id}
+              path="params.height"
               value={params.height}
               min={0.1}
-              live
               onCommit={(height) => update({ ...params, height })}
             />
           </Field>
           <Field label="Radius ⌀ bottom">
-            <NumberField
+            <ExprField
+              nodeId={node.id}
+              path="params.radiusBottom"
               value={params.radiusBottom}
               min={0}
-              live
               onCommit={(radiusBottom) => update({ ...params, radiusBottom })}
             />
           </Field>
           <Field label="Radius ⌀ top">
-            <NumberField
+            <ExprField
+              nodeId={node.id}
+              path="params.radiusTop"
               value={params.radiusTop}
               min={0}
-              live
               onCommit={(radiusTop) => update({ ...params, radiusTop })}
             />
           </Field>
@@ -198,10 +203,11 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
       return (
         <div className="space-y-1.5">
           <Field label="Radius">
-            <NumberField
+            <ExprField
+              nodeId={node.id}
+              path="params.radius"
               value={params.radius}
               min={0.1}
-              live
               onCommit={(radius) => update({ ...params, radius })}
             />
           </Field>
@@ -220,10 +226,11 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
       return (
         <div className="space-y-1.5">
           <Field label="Height">
-            <NumberField
+            <ExprField
+              nodeId={node.id}
+              path="params.height"
               value={params.height}
               min={0.1}
-              live
               onCommit={(height) => update({ ...params, height })}
             />
           </Field>
@@ -241,10 +248,11 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
       return (
         <div className="space-y-1.5">
           <Field label="Angle (°)">
-            <NumberField
+            <ExprField
+              nodeId={node.id}
+              path="params.degrees"
               value={params.degrees}
               min={1}
-              live
               onCommit={(degrees) => update({ ...params, degrees: Math.min(360, degrees) })}
             />
           </Field>
@@ -520,10 +528,11 @@ function ShellEditor({ node }: { node: ShellNode }) {
   return (
     <div className="space-y-1.5">
       <Field label="Wall (mm)">
-        <NumberField
+        <ExprField
+          nodeId={node.id}
+          path="thickness"
           value={node.thickness}
           min={0.1}
-          live
           onCommit={(thickness) => setShellParams(node.id, thickness, node.openTop)}
         />
       </Field>

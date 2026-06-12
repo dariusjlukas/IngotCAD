@@ -1,10 +1,12 @@
 /**
- * In-canvas geometry for the Measure tool: markers for picked entities and a
- * dimension line per completed measurement. Pure display — nothing here
- * raycasts, and everything draws through the model (depthTest off).
+ * In-canvas geometry for the Measure tool: markers for picked entities, a
+ * dimension line per completed measurement, and a floating value chip at each
+ * measurement's midpoint (screen-space <Html>, so it stays readable at any
+ * zoom). Pure display — nothing here raycasts, and everything draws through
+ * the model (depthTest off).
  */
 import * as THREE from 'three'
-import { Line } from '@react-three/drei'
+import { Html, Line } from '@react-three/drei'
 import { useMeasureStore } from './measureStore'
 import type { MeasureEntity, MeasureResult } from './measureGeometry'
 import { EdgeMarker, VertexMarker } from './pickMarkers'
@@ -65,6 +67,28 @@ function ResultLine({ r }: { r: MeasureResult }) {
   )
 }
 
+/** The value chip floating at the measurement (the full breakdown stays in the overlay). */
+function ResultLabel({ r }: { r: MeasureResult }) {
+  let pos: [number, number, number]
+  let text: string
+  if (r.type === 'distance') {
+    pos = [(r.from[0] + r.to[0]) / 2, (r.from[1] + r.to[1]) / 2, (r.from[2] + r.to[2]) / 2]
+    text = `${r.value.toFixed(2)} mm`
+  } else if (r.type === 'angle') {
+    pos = r.at
+    text = `${r.valueDeg.toFixed(1)}°`
+  } else {
+    return null
+  }
+  return (
+    <Html position={pos} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+      <div className="rounded border border-line-strong bg-panel/90 px-1.5 py-0.5 font-mono text-xs whitespace-nowrap text-fg shadow">
+        {text}
+      </div>
+    </Html>
+  )
+}
+
 export function MeasureVisuals() {
   const active = useMeasureStore((s) => s.active)
   const pending = useMeasureStore((s) => s.pending)
@@ -79,6 +103,7 @@ export function MeasureVisuals() {
           <EntityMarker e={m.a} color={MEASURE_COLOR} />
           <EntityMarker e={m.b} color={MEASURE_COLOR} />
           <ResultLine r={m.result} />
+          <ResultLabel r={m.result} />
         </group>
       ))}
     </>

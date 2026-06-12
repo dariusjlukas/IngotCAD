@@ -61,9 +61,15 @@ export function CameraRig() {
 
   // The default camera instance changes when the projection swaps; reproduce the
   // recorded framing on the new camera. On the very first mount, leave a
-  // perspective camera exactly as the Canvas set it, but still initialize an
-  // orthographic camera (its default zoom of 1 would otherwise be wrong).
+  // perspective camera exactly as the Canvas set it, but initialize an
+  // orthographic camera to the equivalent HOME framing (its default zoom of 1
+  // would otherwise show ~3× too much world — the old "everything starts tiny"
+  // bug). `controls` is a dependency because it registers AFTER this rig
+  // mounts and the startup init needs it; `seenCamera` gates the reframe so
+  // those extra startup firings (controls arriving, store subscriptions
+  // settling) can't re-apply a pose recorded from the uninitialized camera.
   const first = useRef(true)
+  const seenCamera = useRef<THREE.Camera | null>(null)
   useEffect(() => {
     if (!controls) return
     // During a sketch (and its fly-in/out) SketchCameraLock owns the framing, so
@@ -71,13 +77,28 @@ export function CameraRig() {
     // and reproduces the pre-sketch framing on the swapped-back camera.
     if (useViewportStore.getState().sketchCamPhase !== 'idle') {
       first.current = false
+      seenCamera.current = get().camera
       return
     }
     const cam = get().camera
+    if (seenCamera.current === cam) return // same camera — nothing to (re)frame
+    seenCamera.current = cam
     const ortho = cam as THREE.OrthographicCamera
     if (first.current) {
       first.current = false
       if (!ortho.isOrthographicCamera) return
+      // Startup in orthographic: reproduce the perspective HOME framing
+      // deterministically (the pose recorder may have run against the
+      // uninitialized camera, so its values can't be trusted here).
+      const home = new THREE.Vector3(...DEFAULT_CAMERA_POSITION)
+      const homeVisible = 2 * home.length() * Math.tan((FOV * Math.PI) / 360)
+      cam.position.copy(home.normalize().multiplyScalar(ORTHO_DISTANCE))
+      ortho.zoom = sizeHeight / Math.max(1, homeVisible)
+      ortho.updateProjectionMatrix()
+      controls.target.set(0, 0, 0)
+      controls.update()
+      invalidate()
+      return
     }
     const p = pose.current
     if (ortho.isOrthographicCamera) {
@@ -92,7 +113,7 @@ export function CameraRig() {
     controls.update()
     invalidate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camera])
+  }, [camera, controls])
 
   return projection === 'orthographic' || sketchCamPhase !== 'idle' ? (
     <OrthographicCamera makeDefault near={0.1} far={20000} position={DEFAULT_CAMERA_POSITION} />

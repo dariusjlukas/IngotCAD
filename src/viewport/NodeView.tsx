@@ -149,6 +149,16 @@ export function NodeView({ id }: { id: NodeId }) {
   }, [pick])
   useEffect(() => () => hoverGeometry?.dispose(), [hoverGeometry])
 
+  // Selection outline while sectioned: drei's <Edges> material doesn't take
+  // clipping planes, so render a plain EdgesGeometry whose material does
+  // (computed only when actually needed — selected AND sectioned).
+  const sectioned = Boolean(clipPlanes)
+  const clippedOutline = useMemo(() => {
+    if (!selected || !sectioned || !geometry) return null
+    return new THREE.EdgesGeometry(geometry, 20)
+  }, [selected, sectioned, geometry])
+  useEffect(() => () => clippedOutline?.dispose(), [clippedOutline])
+
   // Clear the hover highlight when we leave any picking mode.
   useEffect(() => {
     if (!picking) {
@@ -491,11 +501,19 @@ export function NodeView({ id }: { id: NodeId }) {
           emissiveIntensity={selected ? 0.4 : hovered ? 0.18 : 0}
         />
         {/* Crisp feature-edge outline on the selected object (hidden while a
-            face is being picked, and while sectioned — drei's Edges material
-            doesn't take clipping planes, and an outline floating around
-            clipped-away geometry reads as a bug). */}
+            face is being picked, where the green face highlight leads). While
+            sectioned, a clipping-aware plain outline stands in for drei's
+            <Edges> (whose Line2 material doesn't take clipping planes). */}
         {selected && !picking && !clipPlanes && (
           <Edges threshold={20} color={vpTheme.selectionOutline} lineWidth={2.5} renderOrder={1} />
+        )}
+        {selected && !picking && clippedOutline && (
+          <lineSegments geometry={clippedOutline} renderOrder={1} raycast={() => null}>
+            <lineBasicMaterial
+              color={vpTheme.selectionOutline}
+              clippingPlanes={clipPlanes ?? null}
+            />
+          </lineSegments>
         )}
       </mesh>
 
