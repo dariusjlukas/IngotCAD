@@ -41,6 +41,41 @@ describe('document actions', () => {
     expect(store().doc.rootIds).toEqual([a, b])
   })
 
+  it('wraps a single root in a pattern node and dissolves it on ungroup', () => {
+    const a = store().addPrimitive('box')
+    const p = store().patternNodes([a], {
+      mode: 'linear',
+      count: 4,
+      offset: [10, 0, 0],
+    })
+    expect(p).not.toBeNull()
+    expect(store().doc.rootIds).toEqual([p])
+    const node = store().doc.nodes[p!]
+    expect(node.kind).toBe('pattern')
+    expect(node.kind === 'pattern' && node.spec.mode).toBe('linear')
+    expect(hasChildren(node) && node.childIds).toEqual([a])
+    // The wrapping modifier carries an identity transform (child keeps world pose).
+    expect(node.transform).toEqual(IDENTITY_TRANSFORM)
+
+    store().ungroup(p!)
+    expect(store().doc.nodes[p!]).toBeUndefined()
+    expect(store().doc.rootIds).toEqual([a])
+  })
+
+  it('shellNodes wraps the selection and is undoable', () => {
+    const a = store().addPrimitive('box')
+    const s = store().shellNodes([a], 2, true)
+    const node = store().doc.nodes[s!]
+    expect(node.kind).toBe('shell')
+    expect(node.kind === 'shell' && node.thickness).toBe(2)
+    expect(node.kind === 'shell' && node.openTop).toBe(true)
+    expect(hasChildren(node) && node.childIds).toEqual([a])
+
+    store().undo()
+    expect(store().doc.rootIds).toEqual([a])
+    expect(store().doc.nodes[s!]).toBeUndefined()
+  })
+
   it('applyBoolean(subtract) keeps the selection order as base-then-cutters', () => {
     const a = store().addPrimitive('box')
     const b = store().addPrimitive('cylinder')

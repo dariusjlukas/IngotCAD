@@ -9,6 +9,7 @@ import { GizmoHelper, GizmoViewport, Grid, OrbitControls } from '@react-three/dr
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faHouse } from '@fortawesome/free-solid-svg-icons'
 import { CadScene } from './CadScene'
+import { BuildVolume } from './BuildVolume'
 import { ConstructionPlanes } from './ConstructionPlanes'
 import { CameraController } from './CameraController'
 import { CameraRig } from './CameraRig'
@@ -154,6 +155,7 @@ export function Viewport() {
         {gridEnabled && !inSketchView && (
           <BuildPlateGrid cellColor={theme.gridMinor} sectionColor={theme.gridMajor} />
         )}
+        {!inSketchView && <BuildVolume />}
 
         <CadScene />
         <ConstructionPlanes />

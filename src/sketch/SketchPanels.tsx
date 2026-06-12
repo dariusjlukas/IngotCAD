@@ -185,6 +185,7 @@ export function SketchToolsPanel() {
   const setCircleRadius = useSketchStore((s) => s.setCircleRadius)
   const togglePointFixed = useSketchStore((s) => s.togglePointFixed)
   const toggleConstructionSelected = useSketchStore((s) => s.toggleConstructionSelected)
+  const mirrorSelection = useSketchStore((s) => s.mirrorSelection)
   const clearSelection = useSketchStore((s) => s.clearSelection)
 
   const selPoints = selection
@@ -194,6 +195,7 @@ export function SketchToolsPanel() {
   const selCircles = selection
     .filter((r): r is Extract<Ref, { t: 'circle' }> => r.t === 'circle')
     .map((r) => r.id)
+  const hasShapeSelection = selPoints.length > 0 || selSegs.length > 0 || selCircles.length > 0
 
   const apply = (input: ConstraintInput) => {
     addConstraint(input)
@@ -282,6 +284,19 @@ export function SketchToolsPanel() {
             Toggle construction
           </CBtn>
         </div>
+
+        <div className="mt-2 mb-1 text-xs uppercase tracking-wide text-fg-faint">
+          Mirror selection
+        </div>
+        <div className="flex flex-col gap-1">
+          <CBtn onClick={() => mirrorSelection('y')} disabled={!hasShapeSelection}>
+            Across Y axis (↔)
+          </CBtn>
+          <CBtn onClick={() => mirrorSelection('x')} disabled={!hasShapeSelection}>
+            Across X axis (↕)
+          </CBtn>
+        </div>
+
         <p className="mt-3 text-xs text-fg-faint">
           Tip: shift-click to multi-select. Use Dimension for distances.
         </p>

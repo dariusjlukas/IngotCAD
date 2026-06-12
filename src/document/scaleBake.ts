@@ -96,6 +96,7 @@ export function bakeScaleIntoParams(params: PrimitiveParams, scale: Vec3): BakeR
       }
     case 'extrusion':
     case 'revolution':
+    case 'text':
     case 'mesh':
       // Not foldable into params — keep the scale on the transform.
       return null
@@ -138,7 +139,8 @@ export function primitiveLocalDimensions(params: PrimitiveParams): Vec3 | null {
       const d = Math.max(params.radiusBottom, params.radiusTop) * 2
       return [d, d, params.height]
     }
-    case 'extrusion': {
+    case 'extrusion':
+    case 'text': {
       const b = profileBounds(params.profile)
       return b ? [b.width, b.height, params.height] : [0, 0, params.height]
     }

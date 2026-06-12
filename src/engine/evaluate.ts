@@ -15,10 +15,24 @@
  *                          a root never rebuilds geometry.
  */
 import type { ManifoldToplevel, Manifold, Mat4, CrossSection } from 'manifold-3d'
-import type { BooleanOp, CadDocument, NodeId, PrimitiveParams, Role, Vec2 } from '../document/types'
+import type {
+  BooleanOp,
+  CadDocument,
+  NodeId,
+  PatternSpec,
+  PrimitiveParams,
+  Role,
+  Vec2,
+} from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
 import { EMPTY_MESH } from '../geometry/manifoldToThree'
-import { isIdentityTransform, transformToMat4Array } from '../geometry/transform'
+import {
+  axisRotationMatrix,
+  isIdentityTransform,
+  planeReflectionMatrix,
+  transformToMat4Array,
+  translationMatrix,
+} from '../geometry/transform'
 
 type Wasm = ManifoldToplevel
 
@@ -52,7 +66,19 @@ function buildPrimitive(M: Wasm, doc: CadDocument, params: PrimitiveParams): Man
       return buildExtrusion(M, params.profile, params.height, params.flip ?? false)
     case 'revolution':
       return buildRevolution(M, params.profile, params.degrees, params.segments)
+    case 'text':
+      return buildText(M, params.profile, params.height)
   }
+}
+
+function buildText(M: Wasm, profile: Vec2[][], height: number): Manifold {
+  if (profile.length === 0 || height <= 0) return emptySolid(M)
+  // Even-odd interprets nested contours as holes regardless of winding, so glyph
+  // counters (A/O/e) come out hollow. Extrude 0..height along +Z (rests on z=0).
+  const cross = new M.CrossSection(profile, 'EvenOdd')
+  const solid = cross.extrude(height, 0, 0, undefined, false)
+  cross.delete()
+  return solid
 }
 
 function buildRevolution(M: Wasm, profile: Vec2[][], degrees: number, segments: number): Manifold {
@@ -135,6 +161,108 @@ function combineBoolean(M: Wasm, solids: Manifold[], op: BooleanOp): Manifold {
   return result
 }
 
+/** Hard cap on pattern instances, guarding against a fat-fingered count. */
+const PATTERN_MAX = 512
+/** Circular cross-section of the structuring sphere used to shell (offset). */
+const SHELL_BALL_SEGMENTS = 16
+
+function clampCount(count: number): number {
+  if (!Number.isFinite(count)) return 1
+  return Math.max(1, Math.min(PATTERN_MAX, Math.floor(count)))
+}
+
+/**
+ * Per-instance placement matrices for a pattern. `null` marks the source's own
+ * place (copy 0 / the un-reflected original) so the engine can reuse the base
+ * solid there instead of transforming a needless copy.
+ */
+function patternMatrices(spec: PatternSpec): (number[] | null)[] {
+  switch (spec.mode) {
+    case 'linear': {
+      const n = clampCount(spec.count)
+      const out: (number[] | null)[] = []
+      for (let i = 0; i < n; i++) {
+        out.push(
+          i === 0
+            ? null
+            : translationMatrix([spec.offset[0] * i, spec.offset[1] * i, spec.offset[2] * i]),
+        )
+      }
+      return out
+    }
+    case 'circular': {
+      const n = clampCount(spec.count)
+      // A full turn divides evenly (no overlapping last copy); a partial arc
+      // spreads the copies inclusively from 0 to angleDeg.
+      const full = spec.angleDeg >= 360 - 1e-6
+      const step = full ? 360 / n : spec.angleDeg / Math.max(1, n - 1)
+      const out: (number[] | null)[] = []
+      for (let i = 0; i < n; i++) {
+        out.push(i === 0 ? null : axisRotationMatrix(spec.axisOrigin, spec.axisDir, step * i))
+      }
+      return out
+    }
+    case 'mirror': {
+      const refl = planeReflectionMatrix(spec.planeOrigin, spec.planeNormal)
+      return spec.keepOriginal ? [null, refl] : [refl]
+    }
+  }
+}
+
+function combinePattern(M: Wasm, baseSolids: Manifold[], spec: PatternSpec): Manifold {
+  const base = unionAll(M, baseSolids) // we now own `base`
+  const parts: Manifold[] = []
+  let baseUsed = false
+  for (const mat of patternMatrices(spec)) {
+    if (mat === null) {
+      parts.push(base)
+      baseUsed = true
+    } else {
+      parts.push(base.transform(mat as unknown as Mat4))
+    }
+  }
+  const result = unionAll(M, parts) // consumes every part (incl. base when used)
+  // `base` not placed anywhere (mirror without the original) → free it.
+  if (!baseUsed) base.delete()
+  return result
+}
+
+function combineShell(
+  M: Wasm,
+  baseSolids: Manifold[],
+  thickness: number,
+  openTop: boolean,
+): Manifold {
+  const base = unionAll(M, baseSolids)
+  if (thickness <= 0) return base
+  // Inward offset = morphological erosion by a ball of radius `thickness`.
+  const ball = M.Manifold.sphere(thickness, SHELL_BALL_SEGMENTS)
+  const inner = base.minkowskiDifference(ball)
+  ball.delete()
+  let cut = inner
+  if (openTop && inner.volume() > 1e-6) {
+    // Open the +Z top by extruding the cavity up through the lid, keeping the
+    // side walls full height (the cavity footprint is smaller than the outside).
+    // Shift a copy of the cavity up by an amount that pokes above the part top
+    // (> the lid wall) yet stays joined to the original cavity (< its height),
+    // so the merged hole punches cleanly through only the lid.
+    const ibb = inner.boundingBox()
+    const bbb = base.boundingBox()
+    const cavityH = ibb.max[2] - ibb.min[2]
+    const lidGap = bbb.max[2] - ibb.max[2]
+    if (cavityH > lidGap) {
+      const lifted = inner.translate(0, 0, (lidGap + cavityH) / 2)
+      cut = M.Manifold.union([inner, lifted])
+      inner.delete()
+      lifted.delete()
+    }
+  }
+  const result = base.subtract(cut)
+  cut.delete()
+  base.delete()
+  return result
+}
+
 export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId): Manifold {
   const node = doc.nodes[id]
   if (!node) throw new Error(`Unknown node: ${id}`)
@@ -145,12 +273,17 @@ export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId): Manifold {
     .map((cid) => ({ role: doc.nodes[cid].role, solid: evaluate(M, doc, cid) }))
 
   if (children.length === 0) return emptySolid(M)
-  if (node.kind === 'group') return combineGroup(M, children)
-  return combineBoolean(
-    M,
-    children.map((c) => c.solid),
-    node.op,
-  )
+  const solids = children.map((c) => c.solid)
+  switch (node.kind) {
+    case 'group':
+      return combineGroup(M, children)
+    case 'boolean':
+      return combineBoolean(M, solids, node.op)
+    case 'pattern':
+      return combinePattern(M, solids, node.spec)
+    case 'shell':
+      return combineShell(M, solids, node.thickness, node.openTop)
+  }
 }
 
 export function evaluate(M: Wasm, doc: CadDocument, id: NodeId): Manifold {

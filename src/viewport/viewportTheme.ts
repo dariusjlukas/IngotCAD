@@ -14,6 +14,10 @@ export interface ViewportTheme {
   selectionEmissive: string
   /** Crisp edge-outline color drawn around a selected mesh. */
   selectionOutline: string
+  /** Printer build-volume wireframe (bed outline + height edges). */
+  buildVolume: string
+  /** Build-volume wireframe when the model overflows the bed. */
+  buildVolumeOver: string
   hemiSky: string
   hemiGround: string
   hemiIntensity: number
@@ -31,6 +35,8 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
     gridMinor: '#343c50',
     selectionEmissive: '#1d4ed8',
     selectionOutline: '#8ab4ff',
+    buildVolume: '#5b6478',
+    buildVolumeOver: '#ff6188',
     hemiSky: '#ffffff',
     hemiGround: '#3a3f4b',
     hemiIntensity: 0.65,
@@ -46,6 +52,8 @@ export const VIEWPORT_THEMES: Record<ResolvedTheme, ViewportTheme> = {
     gridMinor: '#c3cad7',
     selectionEmissive: '#2563eb',
     selectionOutline: '#1d4ed8',
+    buildVolume: '#94a0b4',
+    buildVolumeOver: '#d11d52',
     hemiSky: '#ffffff',
     hemiGround: '#c9ccd2',
     hemiIntensity: 0.9,

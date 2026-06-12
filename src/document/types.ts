@@ -169,6 +169,12 @@ export type PrimitiveParams =
       segments: number
       sketch?: SketchSource
     }
+  // Extruded text. `profile` is the pre-tessellated glyph outline set (outer
+  // contours + hole contours, mm, Y-up), extruded `height` along +Z using the
+  // even-odd fill rule so counters (the holes in A/O/e) come out hollow. `text`
+  // and `size` are kept so the label can be re-typed / re-sized (which
+  // regenerates the profile via the font, in the UI layer).
+  | { type: 'text'; text: string; size: number; height: number; profile: Vec2[][] }
 
 export type PrimitiveType = PrimitiveParams['type']
 
@@ -212,10 +218,54 @@ export interface BooleanNode extends BaseNode {
   childIds: NodeId[]
 }
 
-export type CadNode = PrimitiveNode | GroupNode | BooleanNode
+/**
+ * How a pattern replicates its source subtree. All coordinates are in the
+ * pattern node's local space (which equals world space when the node sits at the
+ * root with an identity transform, the normal case after creation).
+ */
+export type PatternSpec =
+  /** `count` copies spaced `offset` mm apart per step (copy 0 = the original). */
+  | { mode: 'linear'; count: number; offset: Vec3 }
+  /**
+   * `count` copies revolved about the axis line (`axisOrigin` + `axisDir`),
+   * spanning `angleDeg` total. A full 360° wraps evenly with no overlap.
+   */
+  | { mode: 'circular'; count: number; angleDeg: number; axisOrigin: Vec3; axisDir: Vec3 }
+  /**
+   * A reflection across the plane (`planeOrigin` + `planeNormal`).
+   * `keepOriginal` unions the source with its mirror image (vs. mirror only).
+   */
+  | { mode: 'mirror'; planeOrigin: Vec3; planeNormal: Vec3; keepOriginal: boolean }
+
+export type PatternMode = PatternSpec['mode']
+
+/**
+ * Replicates its source subtree (the children, combined) into a linear /
+ * circular array or a mirror image. The replication is *derived* in the engine
+ * (Manifold), so the result is a single watertight solid and the source stays
+ * editable as a normal child.
+ */
+export interface PatternNode extends BaseNode {
+  kind: 'pattern'
+  spec: PatternSpec
+  childIds: NodeId[]
+}
+
+/**
+ * Hollows its source subtree to a wall of `thickness` mm (an inward offset
+ * subtracted from the solid), optionally leaving the +Z top open (a lid/box).
+ */
+export interface ShellNode extends BaseNode {
+  kind: 'shell'
+  thickness: number
+  openTop: boolean
+  childIds: NodeId[]
+}
+
+export type CadNode = PrimitiveNode | GroupNode | BooleanNode | PatternNode | ShellNode
 
 /** A node that contains other nodes. */
-export type ContainerNode = GroupNode | BooleanNode
+export type ContainerNode = GroupNode | BooleanNode | PatternNode | ShellNode
 
 /** Raw geometry for an imported mesh (e.g. STL), referenced by `mesh` primitives. */
 export interface MeshAsset {
@@ -255,5 +305,10 @@ export function createEmptyDocument(): CadDocument {
 }
 
 export function hasChildren(node: CadNode): node is ContainerNode {
-  return node.kind === 'group' || node.kind === 'boolean'
+  return (
+    node.kind === 'group' ||
+    node.kind === 'boolean' ||
+    node.kind === 'pattern' ||
+    node.kind === 'shell'
+  )
 }

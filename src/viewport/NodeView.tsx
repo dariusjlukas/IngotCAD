@@ -22,6 +22,7 @@ import { useResolvedTheme } from '../preferences/useResolvedTheme'
 import { usePrefsStore } from '../preferences/prefsStore'
 import { VIEWPORT_THEMES } from './viewportTheme'
 import { registerMesh } from './meshRegistry'
+import { requestFitRecompute } from './fitStore'
 import { useDerivedGeometry } from './useDerivedGeometry'
 import { coplanarFacePositions } from './faceHighlight'
 import { objectToTransform, rotationDegToRadians } from '../geometry/transform'
@@ -106,8 +107,18 @@ export function NodeView({ id }: { id: NodeId }) {
   // Expose this root's mesh so "frame selected" can read its world bounds.
   useEffect(() => {
     registerMesh(id, meshObj)
-    return () => registerMesh(id, null)
+    requestFitRecompute()
+    return () => {
+      registerMesh(id, null)
+      requestFitRecompute()
+    }
   }, [id, meshObj])
+
+  // Keep the build-volume fit check current: geometry rebuilds and committed
+  // transform edits both change this root's world bounds.
+  useEffect(() => {
+    requestFitRecompute()
+  }, [geometry, node?.transform])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null)
   // Latest committed transform, for the no-op guard below.

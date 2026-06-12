@@ -16,6 +16,8 @@ import type {
   CadNode,
   MeshAsset,
   NodeId,
+  PatternMode,
+  PatternSpec,
   PlaneDefinition,
   PrimitiveParams,
   PrimitiveType,
@@ -41,6 +43,7 @@ const TYPE_LABEL: Record<PrimitiveType, string> = {
   mesh: 'Mesh',
   extrusion: 'Sketch',
   revolution: 'Revolve',
+  text: 'Text',
 }
 
 function defaultParams(type: PrimitiveType): PrimitiveParams {
@@ -57,6 +60,10 @@ function defaultParams(type: PrimitiveType): PrimitiveParams {
       return { type: 'extrusion', profile: [], height: 10 }
     case 'revolution':
       return { type: 'revolution', profile: [], degrees: 360, segments: 64 }
+    case 'text':
+      // Real text is created via `addText` (which tessellates a profile); this
+      // empty default only satisfies the type for the generic creation path.
+      return { type: 'text', text: 'Text', size: 10, height: 4, profile: [] }
   }
 }
 
@@ -75,6 +82,8 @@ function restingZ(params: PrimitiveParams): number {
       return params.height / 2
     case 'revolution':
       return 0 // the profile's own Y becomes Z, so no extra lift
+    case 'text':
+      return 0 // extruded 0..height from the plate, so it already rests on z=0
   }
 }
 
@@ -161,6 +170,29 @@ function topLevelOf(doc: CadDocument, ids: NodeId[]): NodeId[] {
 function combineLabel(op: BooleanOp): string {
   return op === 'union' ? 'Union' : op === 'subtract' ? 'Difference' : 'Intersection'
 }
+
+/** Default name base for a pattern of the given mode. */
+const PATTERN_LABEL: Record<PatternMode, string> = {
+  linear: 'Linear Pattern',
+  circular: 'Circular Pattern',
+  mirror: 'Mirror',
+}
+
+/** Starting parameters for each pattern mode (edited afterward in the panel). */
+export const DEFAULT_PATTERN_SPEC: Record<PatternMode, PatternSpec> = {
+  linear: { mode: 'linear', count: 3, offset: [25, 0, 0] },
+  circular: {
+    mode: 'circular',
+    count: 6,
+    angleDeg: 360,
+    axisOrigin: [0, 0, 0],
+    axisDir: [0, 0, 1],
+  },
+  mirror: { mode: 'mirror', planeOrigin: [0, 0, 0], planeNormal: [1, 0, 0], keepOriginal: true },
+}
+
+/** Starting wall thickness (mm) for a new shell. */
+export const DEFAULT_SHELL_THICKNESS = 2
 
 /** How a freshly-created sketch solid folds into an existing object. */
 export interface CombineTarget {
@@ -311,9 +343,15 @@ export interface CadState {
     combine?: CombineTarget,
   ) => NodeId | null
   addMeshAsset: (name: string, position: Float32Array, index: Uint32Array) => NodeId
+  /** Create an extruded-text solid from a pre-tessellated glyph profile. */
+  addText: (text: string, size: number, height: number, profile: Vec2[][]) => NodeId | null
   group: (ids: NodeId[]) => NodeId | null
   ungroup: (id: NodeId) => void
   applyBoolean: (ids: NodeId[], op: BooleanOp) => NodeId | null
+  /** Wrap the selected root object(s) in a linear/circular/mirror pattern. */
+  patternNodes: (ids: NodeId[], spec: PatternSpec) => NodeId | null
+  /** Wrap the selected root object(s) in a hollow shell of the given wall. */
+  shellNodes: (ids: NodeId[], thickness: number, openTop: boolean) => NodeId | null
   deleteNodes: (ids: NodeId[]) => void
   /** Deep-copy the selected subtree(s) as siblings, nudged + selected. */
   duplicateNodes: (ids: NodeId[]) => NodeId[]
@@ -339,6 +377,10 @@ export interface CadState {
    */
   setNodeTransform: (id: NodeId, transform: Transform) => void
   setNodeParams: (id: NodeId, params: PrimitiveParams) => void
+  /** Replace a pattern node's replication spec. */
+  setPatternSpec: (id: NodeId, spec: PatternSpec) => void
+  /** Update a shell node's wall thickness / open-top flag. */
+  setShellParams: (id: NodeId, thickness: number, openTop: boolean) => void
   setRole: (id: NodeId, role: Role) => void
   setNodeName: (id: NodeId, name: string) => void
   setNodeColor: (id: NodeId, color: string) => void
@@ -430,6 +472,33 @@ export const useCadStore = create<CadState>()((set, get) => {
       const firstIdx = doc.rootIds.indexOf(orderedRoots[0])
       doc.nodes[id] = build(id, childIds)
       doc.rootIds = doc.rootIds.filter((rid) => !rootChildren.includes(rid))
+      doc.rootIds.splice(firstIdx, 0, id)
+      doc.featureOrder.push(id)
+      created = id
+    })
+    if (created) get().select([created])
+    return created
+  }
+
+  /**
+   * Wrap the selected object(s) — resolved to their top-level roots — in a single
+   * new container (pattern/shell), inserted where the first root was. The roots
+   * keep their world pose (the container is identity), so the modifier just adds
+   * a derivation on top. Unlike `makeContainer`, one root is enough.
+   */
+  const wrapRoots = (
+    ids: NodeId[],
+    build: (id: NodeId, childIds: NodeId[]) => CadNode,
+  ): NodeId | null => {
+    const id = nanoid()
+    let created: NodeId | null = null
+    mutate((doc) => {
+      const roots = [...new Set(ids.map((nid) => rootOf(doc, nid)))].filter((rid) => doc.nodes[rid])
+      const ordered = doc.rootIds.filter((rid) => roots.includes(rid))
+      if (ordered.length === 0) return
+      const firstIdx = doc.rootIds.indexOf(ordered[0])
+      doc.nodes[id] = build(id, ordered)
+      doc.rootIds = doc.rootIds.filter((rid) => !roots.includes(rid))
       doc.rootIds.splice(firstIdx, 0, id)
       doc.featureOrder.push(id)
       created = id
@@ -613,6 +682,30 @@ export const useCadStore = create<CadState>()((set, get) => {
       return id
     },
 
+    addText: (text, size, height, profile) => {
+      if (profile.length === 0 || height <= 0) return null
+      const id = nanoid()
+      const name = nextName(TYPE_LABEL.text)
+      const color = PALETTE[get().counter % PALETTE.length]
+      mutate((doc) => {
+        const offset = doc.rootIds.length * 4
+        doc.nodes[id] = {
+          id,
+          kind: 'primitive',
+          name,
+          params: { type: 'text', text, size, height, profile },
+          color,
+          visible: true,
+          role: 'solid',
+          transform: { position: [offset, offset, 0], rotationDeg: [0, 0, 0], scale: [1, 1, 1] },
+        }
+        doc.rootIds.push(id)
+        doc.featureOrder.push(id)
+      })
+      get().select([id])
+      return id
+    },
+
     group: (ids) => {
       const name = nextName('Group')
       const color = PALETTE[get().counter % PALETTE.length]
@@ -650,6 +743,39 @@ export const useCadStore = create<CadState>()((set, get) => {
         }),
         true,
       )
+    },
+
+    patternNodes: (ids, spec) => {
+      const name = nextName(PATTERN_LABEL[spec.mode])
+      const color = PALETTE[get().counter % PALETTE.length]
+      return wrapRoots(ids, (id, childIds) => ({
+        id,
+        kind: 'pattern',
+        name,
+        spec,
+        childIds,
+        color,
+        visible: true,
+        role: 'solid',
+        transform: { ...IDENTITY_TRANSFORM },
+      }))
+    },
+
+    shellNodes: (ids, thickness, openTop) => {
+      const name = nextName('Shell')
+      const color = PALETTE[get().counter % PALETTE.length]
+      return wrapRoots(ids, (id, childIds) => ({
+        id,
+        kind: 'shell',
+        name,
+        thickness,
+        openTop,
+        childIds,
+        color,
+        visible: true,
+        role: 'solid',
+        transform: { ...IDENTITY_TRANSFORM },
+      }))
     },
 
     ungroup: (id) => {
@@ -851,6 +977,21 @@ export const useCadStore = create<CadState>()((set, get) => {
       mutate((doc) => {
         const node = doc.nodes[id]
         if (node && node.kind === 'primitive') node.params = params
+      }),
+
+    setPatternSpec: (id, spec) =>
+      mutate((doc) => {
+        const node = doc.nodes[id]
+        if (node && node.kind === 'pattern') node.spec = spec
+      }),
+
+    setShellParams: (id, thickness, openTop) =>
+      mutate((doc) => {
+        const node = doc.nodes[id]
+        if (node && node.kind === 'shell') {
+          node.thickness = thickness
+          node.openTop = openTop
+        }
       }),
 
     setRole: (id, role) =>

@@ -47,5 +47,13 @@ export function localHash(doc: CadDocument, id: NodeId): string {
       return `G:[${node.childIds.map((c) => fullHash(doc, c)).join(',')}]`
     case 'boolean':
       return `B:${node.op}:[${node.childIds.map((c) => fullHash(doc, c)).join(',')}]`
+    case 'pattern':
+      return `PAT:${JSON.stringify(node.spec)}:[${node.childIds
+        .map((c) => fullHash(doc, c))
+        .join(',')}]`
+    case 'shell':
+      return `SH:${t(node.thickness)},${node.openTop ? 1 : 0}:[${node.childIds
+        .map((c) => fullHash(doc, c))
+        .join(',')}]`
   }
 }

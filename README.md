@@ -25,6 +25,17 @@ non-manifold surprises at slice time.
   plus precise numeric entry in the property panel.
 - **Booleans** — union, subtract, intersect; plus TinkerCAD-style **groups**
   where any child can be flagged as a **hole** (cut).
+- **Patterns** — linear, circular, and mirror arrays (bolt circles, vent slots,
+  repeated mounting holes). Parametric: the source stays editable and the array
+  follows.
+- **Mirror** — reflect a whole solid across a plane, or mirror geometry inside a
+  sketch — symmetry without redrawing.
+- **Shell / hollow** — turn a solid into a wall of a given thickness for
+  enclosures, lids, and weight reduction, with an optional open top.
+- **3D text** — extruded labels from a built-in font (knob/bin labels, name
+  tags); counters in letters like A/O/e come out hollow.
+- **Build volume** — optional printer-bed overlay with an out-of-bounds fit
+  warning and a live model-size readout; the printer size is a setting.
 - **Outliner** — object tree with selection, rename, color, visibility.
 - **Undo / redo** — every edit, including a full gizmo drag, is one step.
 - **Import** STL · **Export** watertight STL and 3MF.
@@ -50,6 +61,7 @@ src/
   engine/     the ONLY code that touches Manifold; evaluation + hashing
   geometry/   pure conversions (Manifold <-> three.js) and transforms
   viewport/   React Three Fiber scene, per-node rendering, transform gizmo
+  text/       font -> 2D glyph-contour tessellation for the text tool
   ui/         toolbar, outliner, property editor, status bar
   io/         STL/3MF export, STL import, project save/open
 ```

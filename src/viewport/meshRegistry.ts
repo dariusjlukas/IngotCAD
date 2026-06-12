@@ -17,6 +17,23 @@ export function registerMesh(id: NodeId, obj: THREE.Object3D | null): void {
   else registry.delete(id)
 }
 
+/**
+ * World-space AABB of every rendered (visible) root mesh, or null when nothing
+ * is rendered. Uses the live three.js world matrices, so it reflects each root's
+ * current transform without re-evaluating geometry.
+ */
+export function unionWorldBounds(): THREE.Box3 | null {
+  const box = new THREE.Box3()
+  let any = false
+  for (const obj of registry.values()) {
+    const b = new THREE.Box3().setFromObject(obj)
+    if (b.isEmpty()) continue
+    box.union(b)
+    any = true
+  }
+  return any && !box.isEmpty() ? box : null
+}
+
 function parentOf(doc: CadDocument, id: NodeId): NodeId | null {
   for (const n of Object.values(doc.nodes)) {
     if (hasChildren(n) && n.childIds.includes(id)) return n.id

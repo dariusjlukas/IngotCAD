@@ -8,14 +8,17 @@ import {
   faPencil,
   faBorderAll,
   faArrowPointer,
+  faFont,
 } from '@fortawesome/free-solid-svg-icons'
-import { useCadStore } from '../document/store'
+import { DEFAULT_PATTERN_SPEC, DEFAULT_SHELL_THICKNESS, useCadStore } from '../document/store'
 import { selectCanRedo, selectCanUndo, selectSingleSelected } from '../document/selectors'
 import { useViewportStore } from '../viewport/viewportStore'
 import type { ToolMode } from '../viewport/viewportStore'
 import { usePlaneBuilderStore } from '../viewport/planeBuilderStore'
 import { useSketchStore } from '../sketch/sketchStore'
+import { textToContours } from '../text/font'
 import { openContextMenu } from './contextMenuStore'
+import { toast } from './toastStore'
 
 function Btn({
   onClick,
@@ -63,10 +66,13 @@ export function Toolbar() {
   const selected = useCadStore(selectSingleSelected)
 
   const addPrimitive = useCadStore((s) => s.addPrimitive)
+  const addText = useCadStore((s) => s.addText)
   const addPlane = useCadStore((s) => s.addPlane)
   const applyBoolean = useCadStore((s) => s.applyBoolean)
   const group = useCadStore((s) => s.group)
   const ungroup = useCadStore((s) => s.ungroup)
+  const patternNodes = useCadStore((s) => s.patternNodes)
+  const shellNodes = useCadStore((s) => s.shellNodes)
   const deleteNodes = useCadStore((s) => s.deleteNodes)
   const undo = useCadStore((s) => s.undo)
   const redo = useCadStore((s) => s.redo)
@@ -86,6 +92,34 @@ export function Toolbar() {
       { label: 'Parallel to a face…', onSelect: () => startPlaneTool('face') },
       { label: 'Through 3 points…', onSelect: () => startPlaneTool('threePoints') },
       { label: 'At an angle about an edge…', onSelect: () => startPlaneTool('edgeAngle') },
+    ])
+  }
+
+  const handleAddText = async () => {
+    try {
+      const profile = await textToContours('Text', 10)
+      if (profile.length === 0) {
+        toast.error('Nothing to render for that text.')
+        return
+      }
+      addText('Text', 10, 4, profile)
+    } catch {
+      toast.error('Could not load the text font.')
+    }
+  }
+
+  const openPatternMenu = (e: MouseEvent) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    openContextMenu(r.left, r.bottom + 4, [
+      {
+        label: 'Linear pattern',
+        onSelect: () => patternNodes(selectedIds, DEFAULT_PATTERN_SPEC.linear),
+      },
+      {
+        label: 'Circular pattern',
+        onSelect: () => patternNodes(selectedIds, DEFAULT_PATTERN_SPEC.circular),
+      },
+      { label: 'Mirror', onSelect: () => patternNodes(selectedIds, DEFAULT_PATTERN_SPEC.mirror) },
     ])
   }
 
@@ -113,6 +147,9 @@ export function Toolbar() {
         </Btn>
         <Btn onClick={() => openSketch()} title="Sketch a 2D profile and extrude it">
           <FontAwesomeIcon icon={faPencil} fixedWidth /> Sketch
+        </Btn>
+        <Btn onClick={() => void handleAddText()} title="Add extruded 3D text">
+          <FontAwesomeIcon icon={faFont} fixedWidth /> Text
         </Btn>
         <Btn onClick={openPlaneMenu} title="Add a construction plane">
           <FontAwesomeIcon icon={faBorderAll} fixedWidth /> Plane ▾
@@ -163,6 +200,25 @@ export function Toolbar() {
           title="Ungroup"
         >
           Ungroup
+        </Btn>
+      </Group>
+
+      <Divider />
+
+      <Group>
+        <Btn
+          onClick={openPatternMenu}
+          disabled={!hasSelection}
+          title="Linear / circular / mirror pattern"
+        >
+          Pattern ▾
+        </Btn>
+        <Btn
+          onClick={() => shellNodes(selectedIds, DEFAULT_SHELL_THICKNESS, false)}
+          disabled={!hasSelection}
+          title="Hollow the object to a wall (shell)"
+        >
+          Shell
         </Btn>
       </Group>
 

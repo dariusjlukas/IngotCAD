@@ -117,6 +117,13 @@ interface SketchState {
   select: (refs: Ref[]) => void
   clearSelection: () => void
   deleteSelection: () => void
+  /**
+   * Mirror the selected shapes across a sketch axis ('x' = the horizontal X axis,
+   * flipping Y; 'y' = the vertical Y axis, flipping X), adding reflected copies.
+   * The copies are independent free geometry (no symmetry constraint) — draw half,
+   * mirror the rest.
+   */
+  mirrorSelection: (axis: 'x' | 'y') => void
 
   commit: () => void
 }
@@ -421,6 +428,68 @@ export const useSketchStore = create<SketchState>((set, get) => {
             const shapeId =
               r.t === 'circle' ? r.id : shapeIdOfPoint(d, r.t === 'point' ? r.id : r.a)
             if (shapeId) removeShapeFromData(d, shapeId)
+          }
+        }
+      })
+      set({ selection: [] })
+    },
+
+    mirrorSelection: (axis) => {
+      const refs = get().selection
+      if (refs.length === 0) return
+      update((d) => {
+        // Reflect across the chosen axis line through the origin.
+        const flip = (p: SPoint): Vec2 => (axis === 'x' ? [p.x, -p.y] : [-p.x, p.y])
+        // Shapes the selection touches (a point/segment names its parent shape).
+        const shapeIds = new Set<ShapeId>()
+        for (const r of refs) {
+          if (r.t === 'circle') shapeIds.add(r.id)
+          else if (r.t === 'segment') {
+            const sid = shapeIdOfPoint(d, r.a)
+            if (sid) shapeIds.add(sid)
+          } else if (r.t === 'point') {
+            const sid = shapeIdOfPoint(d, r.id)
+            if (sid) shapeIds.add(sid)
+          }
+        }
+        for (const s of d.shapes.filter((sh) => shapeIds.has(sh.id))) {
+          if (s.kind === 'loop') {
+            const map: Record<PointId, PointId> = {}
+            for (const pid of s.pts) {
+              const p = d.points[pid]
+              if (!p) continue
+              const np = id()
+              const [x, y] = flip(p)
+              d.points[np] = { x, y, fixed: false }
+              map[pid] = np
+            }
+            const corners = s.corners
+              ? Object.fromEntries(
+                  Object.entries(s.corners)
+                    .filter(([pid]) => map[pid])
+                    .map(([pid, t]) => [map[pid], { ...t }]),
+                )
+              : undefined
+            d.shapes.push({
+              id: id(),
+              kind: 'loop',
+              pts: s.pts.map((pid) => map[pid]).filter((p): p is PointId => Boolean(p)),
+              ...(s.construction && { construction: true }),
+              ...(corners && Object.keys(corners).length > 0 && { corners }),
+            })
+          } else {
+            const c = d.points[s.c]
+            if (!c) continue
+            const np = id()
+            const [x, y] = flip(c)
+            d.points[np] = { x, y, fixed: false }
+            d.shapes.push({
+              id: id(),
+              kind: 'circle',
+              c: np,
+              r: s.r,
+              ...(s.construction && { construction: true }),
+            })
           }
         }
       })

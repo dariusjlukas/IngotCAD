@@ -1,6 +1,7 @@
 /** App settings: appearance (theme), viewport (grid), and about. Modal dialog. */
 import type { ReactNode } from 'react'
 import { Modal } from './Modal'
+import { NumberField } from './NumberField'
 import { useDialogStore } from './dialogStore'
 import { usePrefsStore } from '../preferences/prefsStore'
 import type { ThemePreference } from '../preferences/prefsStore'
@@ -71,8 +72,18 @@ export function SettingsDialog() {
   const setGridEnabled = usePrefsStore((s) => s.setGridEnabled)
   const smoothShading = usePrefsStore((s) => s.smoothShading)
   const setSmoothShading = usePrefsStore((s) => s.setSmoothShading)
+  const buildVolumeEnabled = usePrefsStore((s) => s.buildVolumeEnabled)
+  const setBuildVolumeEnabled = usePrefsStore((s) => s.setBuildVolumeEnabled)
+  const buildVolume = usePrefsStore((s) => s.buildVolume)
+  const setBuildVolume = usePrefsStore((s) => s.setBuildVolume)
 
   if (open !== 'settings') return null
+
+  const AXES: { axis: 'x' | 'y' | 'z'; label: string }[] = [
+    { axis: 'x', label: 'W' },
+    { axis: 'y', label: 'D' },
+    { axis: 'z', label: 'H' },
+  ]
 
   return (
     <Modal title="Settings" onClose={() => setOpen(null)}>
@@ -105,6 +116,33 @@ export function SettingsDialog() {
         </Row>
         <Row label="Units">
           <span className="text-sm text-fg">mm · Z-up</span>
+        </Row>
+      </Section>
+
+      <Section title="Build volume">
+        <Row label="Show build volume">
+          <Toggle
+            checked={buildVolumeEnabled}
+            onChange={setBuildVolumeEnabled}
+            label="Show build volume"
+          />
+        </Row>
+        <Row label="Printer size (mm)">
+          <div className="flex gap-1.5">
+            {AXES.map(({ axis, label }) => (
+              <label key={axis} className="flex items-center gap-1">
+                <span className="text-xs text-fg-faint">{label}</span>
+                <div className="w-16">
+                  <NumberField
+                    value={buildVolume[axis]}
+                    min={1}
+                    step={10}
+                    onCommit={(v) => setBuildVolume({ ...buildVolume, [axis]: v })}
+                  />
+                </div>
+              </label>
+            ))}
+          </div>
         </Row>
       </Section>
 

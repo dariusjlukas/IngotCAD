@@ -17,6 +17,8 @@ import {
   faChevronRight,
   faChevronDown,
   faBorderAll,
+  faClone,
+  faBoxOpen,
 } from '@fortawesome/free-solid-svg-icons'
 import { useCadStore } from '../document/store'
 import type { DropPosition } from '../document/store'
@@ -29,6 +31,8 @@ const KIND_ICON: Record<CadNode['kind'], IconDefinition> = {
   primitive: faCube,
   group: faObjectGroup,
   boolean: faShapes,
+  pattern: faClone,
+  shell: faBoxOpen,
 }
 
 interface FlatRow {

@@ -1,9 +1,20 @@
 /** Edits the selected node: name, color, transform, shape params, and role. */
-import type { ReactNode } from 'react'
-import { useCadStore, worldScale } from '../document/store'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { DEFAULT_PATTERN_SPEC, useCadStore, worldScale } from '../document/store'
 import { useSketchStore } from '../sketch/sketchStore'
+import { textToContours } from '../text/font'
+import { toast } from './toastStore'
 import { primitiveLocalDimensions } from '../document/scaleBake'
-import type { PlaneDefinition, PrimitiveNode, PrimitiveParams } from '../document/types'
+import type {
+  PatternMode,
+  PatternNode,
+  PatternSpec,
+  PlaneDefinition,
+  PrimitiveNode,
+  PrimitiveParams,
+  ShellNode,
+  Vec3,
+} from '../document/types'
 import { NumberField, Vec3Field } from './NumberField'
 
 const PLANE_KIND_LABEL: Record<PlaneDefinition['kind'], string> = {
@@ -55,6 +66,71 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <span className="text-xs text-fg-faint">{label}</span>
       <div className="w-24">{children}</div>
     </label>
+  )
+}
+
+/** A text input that commits on blur / Enter (so editing is one undo step). */
+function TextParamInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [text, setText] = useState(value)
+  const focused = useRef(false)
+  useEffect(() => {
+    if (!focused.current) setText(value)
+  }, [value])
+  return (
+    <input
+      value={text}
+      onFocus={() => (focused.current = true)}
+      onBlur={() => {
+        focused.current = false
+        if (text !== value) onCommit(text)
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+      }}
+      className="w-full rounded bg-elevated px-2 py-1 text-sm text-fg-strong outline-none focus:ring-1 focus:ring-accent-ring"
+    />
+  )
+}
+
+function TextEditor({
+  node,
+  params,
+}: {
+  node: PrimitiveNode
+  params: Extract<PrimitiveParams, { type: 'text' }>
+}) {
+  const setNodeParams = useCadStore((s) => s.setNodeParams)
+  // Re-typing / re-sizing regenerates the glyph profile via the font (async).
+  // Re-read the live height so a concurrent depth edit isn't clobbered.
+  const regen = (text: string, size: number) => {
+    textToContours(text, size)
+      .then((profile) => {
+        if (profile.length === 0) return
+        const cur = useCadStore.getState().doc.nodes[node.id]
+        if (cur?.kind !== 'primitive' || cur.params.type !== 'text') return
+        setNodeParams(node.id, { type: 'text', text, size, height: cur.params.height, profile })
+      })
+      .catch(() => toast.error('Could not render text.'))
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="space-y-1">
+        <span className="text-xs text-fg-faint">Text</span>
+        <TextParamInput value={params.text} onCommit={(text) => regen(text, params.size)} />
+      </div>
+      <Field label="Size (mm)">
+        <NumberField value={params.size} min={1} onCommit={(size) => regen(params.text, size)} />
+      </Field>
+      <Field label="Depth (mm)">
+        <NumberField
+          value={params.height}
+          min={0.1}
+          live
+          onCommit={(height) => setNodeParams(node.id, { ...params, height })}
+        />
+      </Field>
+    </div>
   )
 }
 
@@ -179,9 +255,183 @@ function PrimitiveParamsEditor({ node }: { node: PrimitiveNode }) {
           {params.sketch && <EditSketchButton nodeId={node.id} />}
         </div>
       )
+    case 'text':
+      return <TextEditor node={node} params={params} />
     case 'mesh':
       return <p className="text-xs text-fg-faint">Imported mesh — no editable parameters.</p>
   }
+}
+
+const PATTERN_MODE_LABEL: Record<PatternMode, string> = {
+  linear: 'Linear',
+  circular: 'Circular',
+  mirror: 'Mirror',
+}
+
+const UNIT_AXES: { key: string; vec: Vec3 }[] = [
+  { key: 'X', vec: [1, 0, 0] },
+  { key: 'Y', vec: [0, 1, 0] },
+  { key: 'Z', vec: [0, 0, 1] },
+]
+
+/** Quick X/Y/Z buttons for picking an axis/normal direction (the common case). */
+function AxisButtons({ value, onPick }: { value: Vec3; onPick: (axis: Vec3) => void }) {
+  const abs = value.map(Math.abs)
+  const dominant = abs.indexOf(Math.max(...abs))
+  return (
+    <div className="flex overflow-hidden rounded border border-line-strong">
+      {UNIT_AXES.map(({ key, vec }, i) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onPick(vec)}
+          className={
+            'px-2.5 py-0.5 text-xs ' +
+            (dominant === i ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-elevated')
+          }
+        >
+          {key}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function MiniButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded border border-line-strong px-2 py-0.5 text-xs hover:bg-elevated"
+    >
+      {children}
+    </button>
+  )
+}
+
+function PatternEditor({ node }: { node: PatternNode }) {
+  const setPatternSpec = useCadStore((s) => s.setPatternSpec)
+  const spec = node.spec
+  const setSpec = (next: PatternSpec) => setPatternSpec(node.id, next)
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-fg-faint">Type</span>
+        <div className="flex overflow-hidden rounded border border-line-strong">
+          {(['linear', 'circular', 'mirror'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => spec.mode !== m && setSpec(DEFAULT_PATTERN_SPEC[m])}
+              className={
+                'px-2 py-0.5 text-xs ' +
+                (spec.mode === m ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-elevated')
+              }
+            >
+              {PATTERN_MODE_LABEL[m]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {spec.mode === 'linear' && (
+        <div className="space-y-1.5">
+          <Field label="Count">
+            <NumberField
+              value={spec.count}
+              min={1}
+              step={1}
+              live
+              onCommit={(count) => setSpec({ ...spec, count: Math.round(count) })}
+            />
+          </Field>
+          <Vec3Field
+            label="Spacing (mm)"
+            value={spec.offset}
+            step={1}
+            live
+            onCommit={(offset) => setSpec({ ...spec, offset })}
+          />
+        </div>
+      )}
+
+      {spec.mode === 'circular' && (
+        <div className="space-y-1.5">
+          <Field label="Count">
+            <NumberField
+              value={spec.count}
+              min={1}
+              step={1}
+              live
+              onCommit={(count) => setSpec({ ...spec, count: Math.round(count) })}
+            />
+          </Field>
+          <Field label="Angle (°)">
+            <NumberField
+              value={spec.angleDeg}
+              min={1}
+              step={5}
+              live
+              onCommit={(angleDeg) => setSpec({ ...spec, angleDeg: Math.min(360, angleDeg) })}
+            />
+          </Field>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-fg-faint">Axis</span>
+            <AxisButtons value={spec.axisDir} onPick={(axisDir) => setSpec({ ...spec, axisDir })} />
+          </div>
+          <Vec3Field
+            label="Axis point (mm)"
+            value={spec.axisOrigin}
+            step={1}
+            live
+            onCommit={(axisOrigin) => setSpec({ ...spec, axisOrigin })}
+          />
+        </div>
+      )}
+
+      {spec.mode === 'mirror' && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-fg-faint">Across</span>
+            <AxisButtons
+              value={spec.planeNormal}
+              onPick={(planeNormal) => setSpec({ ...spec, planeNormal })}
+            />
+          </div>
+          <Vec3Field
+            label="Plane point (mm)"
+            value={spec.planeOrigin}
+            step={1}
+            live
+            onCommit={(planeOrigin) => setSpec({ ...spec, planeOrigin })}
+          />
+          <MiniButton onClick={() => setSpec({ ...spec, keepOriginal: !spec.keepOriginal })}>
+            {spec.keepOriginal ? 'Keep original + mirror' : 'Mirror only'}
+          </MiniButton>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ShellEditor({ node }: { node: ShellNode }) {
+  const setShellParams = useCadStore((s) => s.setShellParams)
+  return (
+    <div className="space-y-1.5">
+      <Field label="Wall (mm)">
+        <NumberField
+          value={node.thickness}
+          min={0.1}
+          live
+          onCommit={(thickness) => setShellParams(node.id, thickness, node.openTop)}
+        />
+      </Field>
+      <MiniButton onClick={() => setShellParams(node.id, node.thickness, !node.openTop)}>
+        Top: {node.openTop ? 'open' : 'closed'}
+      </MiniButton>
+    </div>
+  )
 }
 
 function PlaneEditor({ width, planeId }: { width: number; planeId: string }) {
@@ -302,6 +552,7 @@ export function PropertyEditor({ width }: { width: number }) {
   const setNodeName = useCadStore((s) => s.setNodeName)
   const setNodeColor = useCadStore((s) => s.setNodeColor)
   const setRole = useCadStore((s) => s.setRole)
+  const ungroup = useCadStore((s) => s.ungroup)
 
   if (planeId) return <PlaneEditor width={width} planeId={planeId} />
 
@@ -412,6 +663,15 @@ export function PropertyEditor({ width }: { width: number }) {
         {node.kind === 'primitive' && (
           <div className="border-t border-line pt-3">
             <PrimitiveParamsEditor node={node} />
+          </div>
+        )}
+
+        {(node.kind === 'pattern' || node.kind === 'shell') && (
+          <div className="space-y-2 border-t border-line pt-3">
+            {node.kind === 'pattern' ? <PatternEditor node={node} /> : <ShellEditor node={node} />}
+            <MiniButton onClick={() => ungroup(id)}>
+              Remove {node.kind === 'pattern' ? 'pattern' : 'shell'}
+            </MiniButton>
           </div>
         )}
       </div>

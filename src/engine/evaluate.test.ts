@@ -154,6 +154,38 @@ describe('Manifold evaluation pipeline', () => {
     expect(vol).toBeLessThan(6300)
   })
 
+  it('extrudes text contours with even-odd holes (counter stays hollow)', () => {
+    // An outer 20×20 square with a concentric 10×10 hole — the kind of nested
+    // contour set a glyph counter produces. Even-odd must hollow the inner loop.
+    const doc = docOf(
+      [
+        prim('t', {
+          type: 'text',
+          text: 'O',
+          size: 10,
+          height: 4,
+          profile: [
+            [
+              [-10, -10],
+              [10, -10],
+              [10, 10],
+              [-10, 10],
+            ],
+            [
+              [-5, -5],
+              [5, -5],
+              [5, 5],
+              [-5, 5],
+            ],
+          ],
+        }),
+      ],
+      ['t'],
+    )
+    // (20² − 10²) × 4 = 300 × 4 = 1200; a filled square would be 1600.
+    expect(measureSolid(M, doc, 't').volume).toBeCloseTo(1200, 0)
+  })
+
   it('unions two disjoint boxes (volume ~16000)', () => {
     const doc = docOf(
       [
@@ -175,6 +207,173 @@ describe('Manifold evaluation pipeline', () => {
     }
     expect(minX).toBeCloseTo(-30, 1)
     expect(maxX).toBeCloseTo(30, 1)
+  })
+})
+
+/** xyz bounds of a raw mesh's positions. */
+function meshBounds(pos: Float32Array) {
+  const b = {
+    minX: Infinity,
+    maxX: -Infinity,
+    minY: Infinity,
+    maxY: -Infinity,
+    minZ: Infinity,
+    maxZ: -Infinity,
+  }
+  for (let i = 0; i < pos.length; i += 3) {
+    b.minX = Math.min(b.minX, pos[i])
+    b.maxX = Math.max(b.maxX, pos[i])
+    b.minY = Math.min(b.minY, pos[i + 1])
+    b.maxY = Math.max(b.maxY, pos[i + 1])
+    b.minZ = Math.min(b.minZ, pos[i + 2])
+    b.maxZ = Math.max(b.maxZ, pos[i + 2])
+  }
+  return b
+}
+
+function container(id: string, extra: Partial<CadNode>, childIds: string[]): CadNode {
+  return {
+    id,
+    name: id,
+    color: '#fff',
+    visible: true,
+    role: 'solid',
+    transform: { ...IDENTITY_TRANSFORM },
+    childIds,
+    ...extra,
+  } as CadNode
+}
+
+describe('pattern / mirror / shell modifiers', () => {
+  it('linear-patterns a box into N disjoint copies (volume × N, extended bounds)', () => {
+    const doc = docOf(
+      [
+        container(
+          'pat',
+          { kind: 'pattern', spec: { mode: 'linear', count: 3, offset: [25, 0, 0] } },
+          ['b'],
+        ),
+        prim('b', { type: 'box', size: [10, 10, 10] }),
+      ],
+      ['pat'],
+    )
+    expect(measureSolid(M, doc, 'pat').volume).toBeCloseTo(3000, 0)
+    const b = meshBounds(computeExportRaw(M, doc, ['pat']).position)
+    expect(b.minX).toBeCloseTo(-5, 2)
+    expect(b.maxX).toBeCloseTo(55, 2) // copy 0 at 0, copy 2 at 50, +half-width
+  })
+
+  it('circular-patterns a box evenly about Z (volume × N, symmetric bounds)', () => {
+    const doc = docOf(
+      [
+        container(
+          'pat',
+          {
+            kind: 'pattern',
+            spec: {
+              mode: 'circular',
+              count: 4,
+              angleDeg: 360,
+              axisOrigin: [0, 0, 0],
+              axisDir: [0, 0, 1],
+            },
+          },
+          ['b'],
+        ),
+        prim('b', { type: 'box', size: [6, 6, 6] }, [20, 0, 0]),
+      ],
+      ['pat'],
+    )
+    expect(measureSolid(M, doc, 'pat').volume).toBeCloseTo(864, 0) // 4 × 216
+    const b = meshBounds(computeExportRaw(M, doc, ['pat']).position)
+    expect(b.maxX).toBeCloseTo(23, 1)
+    expect(b.minX).toBeCloseTo(-23, 1)
+    expect(b.maxY).toBeCloseTo(23, 1)
+  })
+
+  it('mirrors a box across the x=0 plane, keeping the original (symmetric pair)', () => {
+    const doc = docOf(
+      [
+        container(
+          'm',
+          {
+            kind: 'pattern',
+            spec: {
+              mode: 'mirror',
+              planeOrigin: [0, 0, 0],
+              planeNormal: [1, 0, 0],
+              keepOriginal: true,
+            },
+          },
+          ['b'],
+        ),
+        prim('b', { type: 'box', size: [10, 10, 10] }, [10, 0, 0]),
+      ],
+      ['m'],
+    )
+    expect(measureSolid(M, doc, 'm').volume).toBeCloseTo(2000, 0)
+    const b = meshBounds(computeExportRaw(M, doc, ['m']).position)
+    expect(b.minX).toBeCloseTo(-15, 2)
+    expect(b.maxX).toBeCloseTo(15, 2)
+  })
+
+  it('mirror without keepOriginal yields only the reflection', () => {
+    const doc = docOf(
+      [
+        container(
+          'm',
+          {
+            kind: 'pattern',
+            spec: {
+              mode: 'mirror',
+              planeOrigin: [0, 0, 0],
+              planeNormal: [1, 0, 0],
+              keepOriginal: false,
+            },
+          },
+          ['b'],
+        ),
+        prim('b', { type: 'box', size: [10, 10, 10] }, [10, 0, 0]),
+      ],
+      ['m'],
+    )
+    expect(measureSolid(M, doc, 'm').volume).toBeCloseTo(1000, 0)
+    const b = meshBounds(computeExportRaw(M, doc, ['m']).position)
+    expect(b.minX).toBeCloseTo(-15, 2)
+    expect(b.maxX).toBeCloseTo(-5, 2)
+  })
+
+  it('shells a 20mm box to a 2mm wall (hollow volume)', () => {
+    const doc = docOf(
+      [
+        container('s', { kind: 'shell', thickness: 2, openTop: false }, ['b']),
+        prim('b', { type: 'box', size: [20, 20, 20] }),
+      ],
+      ['s'],
+    )
+    // 20³ minus 16³ inner = 8000 − 4096 = 3904.
+    expect(measureSolid(M, doc, 's').volume).toBeCloseTo(3904, 0)
+  })
+
+  it('open-top shell removes the lid (less material than a closed shell)', () => {
+    const closed = docOf(
+      [
+        container('s', { kind: 'shell', thickness: 2, openTop: false }, ['b']),
+        prim('b', { type: 'box', size: [20, 20, 20] }),
+      ],
+      ['s'],
+    )
+    const open = docOf(
+      [
+        container('s', { kind: 'shell', thickness: 2, openTop: true }, ['b']),
+        prim('b', { type: 'box', size: [20, 20, 20] }),
+      ],
+      ['s'],
+    )
+    const vClosed = measureSolid(M, closed, 's').volume
+    const vOpen = measureSolid(M, open, 's').volume
+    expect(vOpen).toBeLessThan(vClosed)
+    expect(vOpen).toBeGreaterThan(0)
   })
 })
 
