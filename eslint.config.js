@@ -7,7 +7,9 @@ import prettier from 'eslint-config-prettier/flat'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // src-tauri is the Rust desktop shell: Cargo sources plus generated build
+  // artifacts (target/, gen/) — none of it is JS/TS for ESLint to lint.
+  globalIgnores(['dist', 'src-tauri']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

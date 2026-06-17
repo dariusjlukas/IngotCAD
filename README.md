@@ -6,7 +6,7 @@ shapes and boolean operations, then export a **watertight, print-ready** STL or
 3MF. It runs entirely client-side.
 
 > Status: MVP
-> A desktop (offline) build is planned for later.
+> Runs in the browser (installable PWA) or as a native offline desktop app — see [Desktop app](#desktop-app-offline).
 > Live demo: [https://dariusjlukas.github.io/IngotCAD/](https://dariusjlukas.github.io/IngotCAD/)
 
 ## Why
@@ -41,6 +41,7 @@ non-manifold surprises at slice time.
 - **Import** STL · **Export** watertight STL and 3MF.
 - **Save / open** projects as JSON.
 - **Installable PWA** — works offline once loaded.
+- **Native desktop app** — small (~9 MB on macOS), fully-offline build via Tauri.
 - **Z-up, millimeters** everywhere — matches how slicers think.
 
 ## Tech stack
@@ -91,12 +92,40 @@ npm run preview   # serve the production build
 npm test          # Vitest (includes a real Manifold pipeline test)
 ```
 
+## Desktop app (offline)
+
+Ingot also packages as a small native desktop app via [Tauri](https://tauri.app) —
+the same web UI in an OS window, with the app shell and Manifold WASM kernel
+bundled into the binary, so it runs **fully offline** (no service worker needed).
+The macOS build is ~9 MB.
+
+**Prerequisites:** the [Rust toolchain](https://rustup.rs) on every platform, plus
+your OS's native build dependencies (Xcode Command Line Tools on macOS; see the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for Windows and
+Linux).
+
+```bash
+npm run tauri:dev     # run the desktop app with live reload
+npm run tauri:build   # build a native installer for the current OS
+```
+
+`tauri:build` runs the web build first, then compiles the Rust shell
+([src-tauri/](src-tauri/)) and bundles a platform installer under
+`src-tauri/target/release/bundle/`. On macOS that's
+`dmg/Ingot_<version>_<arch>.dmg` (drag the app into Applications) plus a
+standalone `macos/Ingot.app`.
+
+The build is unsigned (no Apple Developer cert), so on macOS the first launch
+shows a Gatekeeper warning — **right-click the app → Open** once to allow it.
+Building in a headless/CI environment? Set `CI=true` so the macOS DMG skips the
+Finder-scripted window styling, which needs a GUI session.
+
 ## Roadmap
 
 - Sketch-on-plane -> extrude; fillet / chamfer (needs the OpenCASCADE path).
 - Measurement tools, alignment/snapping helpers.
 - Web Worker geometry evaluation for large models.
-- Desktop build (Tauri) for native file access and offline-first.
+- Native file access for the desktop app — OS open/save dialogs and `.stl` / `.3mf` file associations.
 
 ## License
 

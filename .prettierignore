@@ -3,6 +3,11 @@ dist
 dist-ssr
 dev-dist
 
+# Tauri desktop shell — Rust sources plus Cargo/Tauri-generated output
+# (target/, gen/). Prettier doesn't own the native side; keep it out, the same
+# way eslint.config.js ignores it.
+src-tauri
+
 # Dependencies
 node_modules
 
