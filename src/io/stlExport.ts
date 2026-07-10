@@ -9,12 +9,13 @@ import { engine } from '../engine/engine'
 import { rawMeshToGeometry } from '../geometry/manifoldToThree'
 import { downloadBlob } from './download'
 
-export async function exportStl(doc: CadDocument, filename = 'model.stl'): Promise<void> {
+/** Returns true if a file was downloaded, false if the model evaluates to empty geometry. */
+export async function exportStl(doc: CadDocument, filename = 'model.stl'): Promise<boolean> {
   const visibleRoots = doc.rootIds.filter((id) => doc.nodes[id]?.visible)
-  if (visibleRoots.length === 0) return
+  if (visibleRoots.length === 0) return false
 
   const raw = await engine.computeExportMesh(doc, visibleRoots)
-  if (raw.index.length === 0) return
+  if (raw.index.length === 0) return false
 
   const geometry = rawMeshToGeometry(raw)
   const mesh = new THREE.Mesh(geometry)
@@ -24,4 +25,5 @@ export async function exportStl(doc: CadDocument, filename = 'model.stl'): Promi
   // 1 three.js unit == 1 mm; STL is unitless and slicers assume mm.
   const blob = new Blob([data as unknown as BlobPart], { type: 'model/stl' })
   downloadBlob(blob, filename)
+  return true
 }

@@ -52,7 +52,11 @@ export function localHash(doc: CadDocument, id: NodeId): string {
         .map((c) => fullHash(doc, c))
         .join(',')}]`
     case 'shell':
-      return `SH:${t(node.thickness)},${node.openTop ? 1 : 0}:[${node.childIds
+      // Evaluation branches discontinuously at thickness <= 0 (no shell at
+      // all), so that state must hash distinctly — t() alone would collapse
+      // every |thickness| < 5e-7 to '0' and serve stale geometry across the
+      // boundary.
+      return `SH:${node.thickness > 0 ? t(node.thickness) : 'off'},${node.openTop ? 1 : 0}:[${node.childIds
         .map((c) => fullHash(doc, c))
         .join(',')}]`
     case 'edgeTreatment':

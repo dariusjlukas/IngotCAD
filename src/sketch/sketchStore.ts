@@ -210,7 +210,12 @@ export const useSketchStore = create<SketchState>((set, get) => {
     construction: false,
     outputMode: 'extrude',
 
-    open: () =>
+    open: () => {
+      // Entering sketch mode orphans any unconfirmed extrude/revolve: its
+      // floating confirm panel would stay live over the sketch UI and its
+      // global Enter/Escape handlers could commit or discard the stale
+      // operation mid-sketch. Cancel it up front.
+      useOperationStore.getState().cancel()
       set({
         choosing: true,
         active: false,
@@ -225,12 +230,15 @@ export const useSketchStore = create<SketchState>((set, get) => {
         view: DEFAULT_VIEW,
         construction: false,
         outputMode: 'extrude',
-      }),
+      })
+    },
     editSketch: (nodeId) => {
       const node = useCadStore.getState().doc.nodes[nodeId]
       if (!node || node.kind !== 'primitive') return
       const p = node.params
       if ((p.type !== 'extrusion' && p.type !== 'revolution') || !p.sketch) return
+      // Same as open(): a pending operation must not survive into sketch mode.
+      useOperationStore.getState().cancel()
       set({
         active: true,
         choosing: false,
@@ -434,7 +442,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
       return cid
     },
 
-    setDimensionValue: (cid, value) =>
+    setDimensionValue: (cid, value) => {
+      if (!Number.isFinite(value)) return
       update((d) => {
         const c = d.constraints.find((x) => x.id === cid)
         if (!c) return
@@ -444,7 +453,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
           const r = c.diameter ? value / 2 : value
           c.value = Math.max(0.05, r)
         } else if (c.kind === 'angle') c.value = Math.min(179.5, Math.max(0.5, value))
-      }),
+      })
+    },
 
     setDimensionDiameter: (cid, diameter) =>
       update((d) => {
@@ -457,11 +467,13 @@ export const useSketchStore = create<SketchState>((set, get) => {
 
     setDistanceValue: (cid, value) => get().setDimensionValue(cid, value),
 
-    setCircleRadius: (shapeId, r) =>
+    setCircleRadius: (shapeId, r) => {
+      if (!Number.isFinite(r)) return
       update((d) => {
         const s = d.shapes.find((x) => x.id === shapeId)
         if (s && s.kind === 'circle') s.r = Math.max(0.05, r)
-      }),
+      })
+    },
 
     setSegmentArc: (a, b, center, ccw) =>
       update((d) => {
@@ -501,7 +513,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
         d.constraints = d.constraints.filter((c) => !constraintPoints(c).includes(arc.center))
       }),
 
-    setArcRadius: (a, b, r) =>
+    setArcRadius: (a, b, r) => {
+      if (!Number.isFinite(r)) return
       update((d) => {
         const seg = findLoopSegment(d, a, b)
         const arc = seg?.loop.arcs?.[seg.startPid]
@@ -523,7 +536,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
         const h = Math.sqrt(Math.max(0, radius * radius - (L * L) / 4))
         C.x = mx + nx * h * side
         C.y = my + ny * h * side
-      }),
+      })
+    },
 
     setPointPos: (pid, x, y) =>
       update((d) => {

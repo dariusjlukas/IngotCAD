@@ -14,6 +14,7 @@ export function OperationConfirm() {
   const pending = useOperationStore((s) => s.pending)
   const setValue = useOperationStore((s) => s.setValue)
   const setSignedValue = useOperationStore((s) => s.setSignedValue)
+  const setMagnitude = useOperationStore((s) => s.setMagnitude)
   const toggleFlip = useOperationStore((s) => s.toggleFlip)
   const setCombine = useOperationStore((s) => s.setCombine)
   const confirm = useOperationStore((s) => s.confirm)
@@ -44,8 +45,11 @@ export function OperationConfirm() {
   const isExtrude = pending.mode === 'extrude'
   const max = isExtrude ? 200 : 360
   const step = isExtrude ? 0.5 : 1
-  // Extrude is signed (negative auto-flips); the displayed field value is |value|.
-  const onField = isExtrude ? setSignedValue : setValue
+  // The field shows |value| in the current direction (negative flips); the
+  // slider is the signed extent along +normal. Each commits through its own
+  // convention so the direction never changes out from under what's displayed.
+  const onField = isExtrude ? setMagnitude : setValue
+  const onSlider = isExtrude ? setSignedValue : setValue
   const signed = pending.flip ? -pending.value : pending.value
 
   return (
@@ -70,7 +74,7 @@ export function OperationConfirm() {
         max={max}
         step={step}
         value={isExtrude ? Math.max(-max, Math.min(max, signed)) : Math.min(pending.value, max)}
-        onChange={(e) => onField(parseFloat(e.target.value))}
+        onChange={(e) => onSlider(parseFloat(e.target.value))}
         className="w-40 accent-accent"
       />
       {isExtrude && (

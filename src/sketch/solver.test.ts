@@ -94,3 +94,31 @@ describe('constraint solver', () => {
     expect(d.points.p2.y).toBeCloseTo(20, 0)
   })
 })
+
+describe('solver robustness regressions', () => {
+  it('skips a non-finite distance value instead of NaN-poisoning the points', () => {
+    // parseFloat('1e999') = Infinity used to reach the solver and turn both
+    // points into NaN within two sweeps, irrecoverably (no sketch-mode undo).
+    const d = data({ a: P(0, 0), b: P(10, 0) }, [
+      { id: 'c', kind: 'distance', a: 'a', b: 'b', value: Infinity },
+    ])
+    solve(d)
+    expect(d.points.a).toEqual({ x: 0, y: 0, fixed: false })
+    expect(d.points.b).toEqual({ x: 10, y: 0, fixed: false })
+  })
+
+  it('ignores parallel/perpendicular constraints with dangling point refs', () => {
+    // A hand-edited/truncated project file can reference a missing point; the
+    // solver must skip the constraint (like tangent/angle do), not throw on
+    // every subsequent edit.
+    const d = data({ a: P(0, 0), b: P(10, 0) }, [
+      { id: 'c1', kind: 'parallel', a: 'a', b: 'b', c: 'ghost', d: 'a' },
+      { id: 'c2', kind: 'perpendicular', a: 'ghost', b: 'b', c: 'a', d: 'b' },
+    ])
+    expect(() => solve(d)).not.toThrow()
+    for (const p of Object.values(d.points)) {
+      expect(Number.isFinite(p.x)).toBe(true)
+      expect(Number.isFinite(p.y)).toBe(true)
+    }
+  })
+})

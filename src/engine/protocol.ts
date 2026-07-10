@@ -52,9 +52,29 @@ export type EngineResult = RawMesh | MeasureInfo | Vec2[][][]
 
 export type EngineResponse =
   | { type: 'ready' }
+  /** The worker's WASM module failed to load (e.g. fetch 404, OOM) — it will
+   * never become ready and answers every request with an `error`. */
+  | { type: 'load-error'; message: string }
   | { type: 'result'; id: number; result: EngineResult; warnings: EvalWarning[] }
   | { type: 'error'; id: number; message: string }
   | { type: 'missing-assets'; id: number; assetIds: string[] }
+
+/**
+ * Transfer list for posting a `RawMesh` across the worker boundary. Real meshes
+ * transfer their buffers (zero-copy fast path). Zero-length buffers are omitted:
+ * failed/empty evaluations return the shared `EMPTY_MESH` singleton, and
+ * transferring its buffers would detach them, making every later post of the
+ * singleton throw DataCloneError. A buffer shared by both views is listed once
+ * (transferring the same buffer twice also throws).
+ */
+export function rawMeshTransferList(raw: RawMesh): Transferable[] {
+  const transfer: Transferable[] = []
+  if (raw.position.buffer.byteLength > 0) transfer.push(raw.position.buffer)
+  if (raw.index.buffer.byteLength > 0 && raw.index.buffer !== raw.position.buffer) {
+    transfer.push(raw.index.buffer)
+  }
+  return transfer
+}
 
 /**
  * Strip a document for the wire. `knownAssetIds` is the client's record of what

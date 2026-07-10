@@ -450,4 +450,70 @@ describe('sketch-plane sectioning (projectSceneRaw)', () => {
     )
     expect(groups).toEqual([])
   })
+
+  it('measureSolid reports the world volume of a scaled node and of a scaled ancestor', () => {
+    // Regression: measureSolid used the LOCAL solid, so a scaled object showed
+    // 1/8th of the volume that exports (and prints).
+    const scaled = prim('b', { type: 'box', size: [20, 20, 20] })
+    scaled.transform = { ...scaled.transform, scale: [2, 2, 2] }
+    const doc = docOf([scaled], ['b'])
+    expect(measureSolid(M, doc, 'b').volume).toBeCloseTo(64000, 0)
+
+    // Same box, unscaled, inside a group scaled ×2: ancestors count too.
+    const doc2 = docOf(
+      [
+        {
+          id: 'g',
+          kind: 'group',
+          name: 'g',
+          color: '#fff',
+          visible: true,
+          role: 'solid',
+          transform: { ...IDENTITY_TRANSFORM, scale: [2, 2, 2] },
+          childIds: ['b'],
+        },
+        prim('b', { type: 'box', size: [20, 20, 20] }),
+      ],
+      ['g'],
+    )
+    expect(measureSolid(M, doc2, 'g').volume).toBeCloseTo(64000, 0)
+    expect(measureSolid(M, doc2, 'b').volume).toBeCloseTo(64000, 0)
+  })
+
+  it("honors a child's hole role inside pattern and shell nodes", () => {
+    // Regression: pattern/shell flattened children to bare solids, so a hole
+    // child ADDED material instead of cutting it.
+    // Center-origin cylinder spanning z −20..20: cuts clean through the box.
+    const bore = prim('bore', {
+      type: 'cylinder',
+      height: 40,
+      radiusBottom: 5,
+      radiusTop: 5,
+      segments: 64,
+    })
+    bore.role = 'hole'
+    const doc = docOf(
+      [
+        {
+          id: 'pat',
+          kind: 'pattern',
+          name: 'pat',
+          color: '#fff',
+          visible: true,
+          role: 'solid',
+          transform: { ...IDENTITY_TRANSFORM },
+          spec: { mode: 'linear', count: 2, offset: [40, 0, 0] },
+          childIds: ['box', 'bore'],
+        },
+        prim('box', { type: 'box', size: [20, 20, 20] }),
+        bore,
+      ],
+      ['pat'],
+    )
+    const { volume } = measureSolid(M, doc, 'pat')
+    // Each copy: 8000 − π·5²·20 ≈ 6429; two copies ≈ 12858. The buggy union
+    // behavior instead lands near 2·(8000 + bore-above-box) > 16000.
+    expect(volume).toBeGreaterThan(12000)
+    expect(volume).toBeLessThan(13500)
+  })
 })

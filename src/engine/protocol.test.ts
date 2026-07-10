@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { fromWireDocument, toWireDocument } from './protocol'
+import { fromWireDocument, rawMeshTransferList, toWireDocument } from './protocol'
+import { EMPTY_MESH } from '../geometry/manifoldToThree'
 import { createEmptyDocument } from '../document/types'
 import type { MeshAsset } from '../document/types'
 
@@ -44,5 +45,30 @@ describe('wire document asset sync', () => {
     doc.assets = { a1: asset(1) }
     const wire = toWireDocument(doc, new Set())
     expect('assets' in wire).toBe(false)
+  })
+})
+
+describe('rawMeshTransferList', () => {
+  it('transfers both buffers of a real mesh', () => {
+    const raw = {
+      position: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      index: new Uint32Array([0, 1, 2]),
+    }
+    expect(rawMeshTransferList(raw)).toEqual([raw.position.buffer, raw.index.buffer])
+  })
+
+  it('never transfers the shared EMPTY_MESH singleton buffers', () => {
+    expect(rawMeshTransferList(EMPTY_MESH)).toEqual([])
+  })
+
+  it('omits zero-length buffers individually', () => {
+    const position = new Float32Array([0, 0, 0])
+    expect(rawMeshTransferList({ position, index: new Uint32Array(0) })).toEqual([position.buffer])
+  })
+
+  it('lists a buffer shared by both views only once', () => {
+    const buffer = new ArrayBuffer(24)
+    const raw = { position: new Float32Array(buffer, 0, 3), index: new Uint32Array(buffer, 12, 3) }
+    expect(rawMeshTransferList(raw)).toEqual([buffer])
   })
 })

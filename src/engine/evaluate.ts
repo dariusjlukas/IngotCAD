@@ -274,9 +274,20 @@ export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId, warn?: Warn
   if (!node) throw new Error(`Unknown node: ${id}`)
   if (node.kind === 'primitive') return buildPrimitive(M, doc, node.params)
 
-  const children: RoledSolid[] = node.childIds
-    .filter((cid) => doc.nodes[cid])
-    .map((cid) => ({ role: doc.nodes[cid].role, solid: evaluate(M, doc, cid, warn) }))
+  const children: RoledSolid[] = []
+  for (const cid of node.childIds) {
+    const child = doc.nodes[cid]
+    if (!child) continue
+    try {
+      children.push({ role: child.role, solid: evaluate(M, doc, cid, warn) })
+    } catch (err) {
+      // Free the siblings evaluated before the failure: computeMeshRaw catches
+      // the rethrow and returns EMPTY_MESH, but without this every
+      // re-evaluation of a failing tree would leak its healthy WASM solids.
+      for (const c of children) c.solid.delete()
+      throw err
+    }
+  }
 
   if (children.length === 0) return emptySolid(M)
   const solids = children.map((c) => c.solid)
@@ -284,11 +295,14 @@ export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId, warn?: Warn
     case 'group':
       return combineGroup(M, children)
     case 'boolean':
+      // Roles don't apply here: the op itself says how children combine.
       return combineBoolean(M, solids, node.op)
     case 'pattern':
-      return combinePattern(M, solids, node.spec)
+      // Honor solid/hole roles like a group, then replicate the combined body.
+      return combinePattern(M, [combineGroup(M, children)], node.spec)
     case 'shell':
-      return combineShell(M, solids, node.thickness, node.openTop)
+      // Honor solid/hole roles like a group, then hollow the combined body.
+      return combineShell(M, [combineGroup(M, children)], node.thickness, node.openTop)
     case 'edgeTreatment': {
       // Honor solid/hole roles like a group, then cut the picked edges.
       const base = combineGroup(M, children)
@@ -425,7 +439,19 @@ export function projectSceneRaw(
   return groups
 }
 
-/** Triangle count + volume (mm³) of a subtree. */
+/** Parent container of a node, or null for a root. */
+function parentIdOf(doc: CadDocument, id: NodeId): NodeId | null {
+  for (const [nid, node] of Object.entries(doc.nodes)) {
+    if (node.kind !== 'primitive' && node.childIds.includes(id)) return nid
+  }
+  return null
+}
+
+/**
+ * Triangle count + volume (mm³) of a subtree, in WORLD space: the node's own
+ * transform and every ancestor's are applied, so the volume matches the
+ * exported/printed part even when the node (or a wrapping group) is scaled.
+ */
 export function measureSolid(
   M: Wasm,
   doc: CadDocument,
@@ -433,8 +459,17 @@ export function measureSolid(
 ): { triangles: number; volume: number } {
   let solid: Manifold | null = null
   try {
-    solid = evaluateLocal(M, doc, id)
-    return { triangles: solid.numTri(), volume: solid.volume() }
+    let s = evaluate(M, doc, id)
+    solid = s
+    for (let cur = parentIdOf(doc, id); cur; cur = parentIdOf(doc, cur)) {
+      const tr = doc.nodes[cur].transform
+      if (isIdentityTransform(tr)) continue
+      const next = s.transform(transformToMat4Array(tr) as unknown as Mat4)
+      s.delete()
+      s = next
+      solid = s
+    }
+    return { triangles: s.numTri(), volume: s.volume() }
   } catch {
     return { triangles: 0, volume: 0 }
   } finally {

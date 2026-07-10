@@ -45,7 +45,15 @@ export function planeFromThreePoints(a: Vec3, b: Vec3, c: Vec3): SketchPlane {
   let u = ab.clone()
   if (u.lengthSq() < 1e-12) u = new THREE.Vector3(1, 0, 0) // a == b → arbitrary in-plane axis
   // Re-orthogonalize U against N (it already is when the points are valid).
-  u.addScaledVector(n, -u.dot(n)).normalize()
+  u.addScaledVector(n, -u.dot(n))
+  if (u.lengthSq() < 1e-12) {
+    // a→b parallel to the fallback normal (e.g. all three points collinear
+    // along Z): projecting left nothing — derive an in-plane axis instead of
+    // returning a singular zero basis.
+    const ref = Math.abs(n.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0)
+    u = new THREE.Vector3().crossVectors(ref, n)
+  }
+  u.normalize()
   const v = new THREE.Vector3().crossVectors(n, u).normalize()
   return { origin: [...a], u: [u.x, u.y, u.z], v: [v.x, v.y, v.z], n: [n.x, n.y, n.z] }
 }

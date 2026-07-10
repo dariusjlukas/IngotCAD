@@ -178,7 +178,6 @@ function circleTool(
 ): Manifold | null {
   if (!edge.center || !edge.axis || edge.radius == null || !edge.closed) return null
   const R = edge.radius
-  if (size >= R - 0.1) return null // the cut would reach the axis
   // Build the profile in the (radial x, axial y) half-plane at a sample point
   // (exact for surfaces of revolution), with the edge at (R, 0).
   const S = edge.points[0]
@@ -190,6 +189,15 @@ function circleTool(
   const to2d = (x: Vec3): Vec2 => [dot(x, rho), dot(x, zhat)]
   const profile = cutProfile2D(M, kind, size, f, edge.convex, to2d, [R, 0])
   if (!profile) return null
+  // The cut must not reach the revolve axis. `size` alone is no proxy for the
+  // profile's radial reach — a fillet's tangency setback k·cosT far exceeds
+  // `size` on an acute wedge (e.g. a cone rim) — so test the built profile's
+  // actual minimum radial coordinate: revolve() silently CLIPS contours that
+  // cross the Y axis, turning the tool into garbage that can destroy the part.
+  if (profile.bounds().min[0] <= 0.1) {
+    profile.delete()
+    return null
+  }
   // Revolve about the cross-section's Y axis → a solid around local Z.
   const solid = profile.revolve(FILLET_SEGMENTS, 360)
   profile.delete()

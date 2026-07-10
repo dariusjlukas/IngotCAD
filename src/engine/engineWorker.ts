@@ -11,8 +11,9 @@
  */
 import { loadManifold } from './manifoldModule'
 import { computeExportRaw, computeMeshRaw, measureSolid, projectSceneRaw } from './evaluate'
-import { fromWireDocument } from './protocol'
+import { fromWireDocument, rawMeshTransferList } from './protocol'
 import type { EngineRequest, EngineResponse, EvalWarning } from './protocol'
+import type { ManifoldToplevel } from 'manifold-3d'
 import type { MeshAsset } from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
 
@@ -22,20 +23,38 @@ const ready = loadManifold().then((wasm) => {
   post({ type: 'ready' })
   return wasm
 })
+// A boot failure (wasm fetch 404 after a redeploy, offline, OOM) must not stay
+// an unhandled rejection — the parent's Worker.onerror never sees those. Tell
+// the client so first-launch callers get errors instead of hanging forever.
+ready.catch((err: unknown) => {
+  post({ type: 'load-error', message: errorMessage(err) })
+})
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
 
 function post(msg: EngineResponse, transfer: Transferable[] = []): void {
   ;(self as unknown as Worker).postMessage(msg, transfer)
 }
 
 function postMesh(id: number, raw: RawMesh, warnings: EvalWarning[]): void {
-  post({ type: 'result', id, result: raw, warnings }, [raw.position.buffer, raw.index.buffer])
+  post({ type: 'result', id, result: raw, warnings }, rawMeshTransferList(raw))
 }
 
 self.onmessage = async (ev: MessageEvent<EngineRequest>) => {
   const req = ev.data
   // The only await; after it the handler is synchronous, so requests are
   // processed strictly in arrival order even though the handler is async.
-  const M = await ready
+  let M: ManifoldToplevel
+  try {
+    M = await ready
+  } catch (err) {
+    // Manifold never loaded: settle this request so the caller's promise
+    // resolves and its RequestQueue slot is released.
+    post({ type: 'error', id: req.id, message: errorMessage(err) })
+    return
+  }
 
   for (const [id, asset] of Object.entries(req.doc.inlineAssets)) {
     assetCache.set(id, asset)
@@ -70,6 +89,6 @@ self.onmessage = async (ev: MessageEvent<EngineRequest>) => {
         break
     }
   } catch (err) {
-    post({ type: 'error', id: req.id, message: err instanceof Error ? err.message : String(err) })
+    post({ type: 'error', id: req.id, message: errorMessage(err) })
   }
 }

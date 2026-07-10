@@ -193,6 +193,25 @@ describe('operation store', () => {
     expect(op().pending?.combine).toBe('union')
   })
 
+  it('setMagnitude on a flipped extrude keeps the direction and combine mode', () => {
+    const box = cad().addPrimitive('box')
+    startOnObject(box)
+    op().toggleFlip() // extruding into the body: flip=true, auto-subtract
+    expect(op().pending?.flip).toBe(true)
+    expect(op().pending?.combine).toBe('subtract')
+    // Typing a new positive magnitude into the height field must not un-flip
+    // the extrusion or swap subtract back to union.
+    op().setMagnitude(8)
+    expect(op().pending?.value).toBe(8)
+    expect(op().pending?.flip).toBe(true)
+    expect(op().pending?.combine).toBe('subtract')
+    // A negative magnitude flips to the other side (and auto-combine follows).
+    op().setMagnitude(-3)
+    expect(op().pending?.value).toBe(3)
+    expect(op().pending?.flip).toBe(false)
+    expect(op().pending?.combine).toBe('union')
+  })
+
   it('an explicit combine choice stops auto-tracking the flip', () => {
     const box = cad().addPrimitive('box')
     startOnObject(box)

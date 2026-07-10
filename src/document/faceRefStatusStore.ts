@@ -42,8 +42,12 @@ export function setStaleFaceStatuses(next: Record<string, StaleFaceInfo>): void 
       )
     }
   }
+  // Compare full payloads, not just statuses: after a source face moves a
+  // SECOND time the key and status ('moved') are identical but the rebind
+  // frame differs — skipping the update would make "Rebind to face" write the
+  // first move's outdated plane into the document forever.
   const changed =
     Object.keys(prev).length !== Object.keys(next).length ||
-    Object.entries(next).some(([k, v]) => prev[k]?.status !== v.status)
+    Object.entries(next).some(([k, v]) => JSON.stringify(prev[k]) !== JSON.stringify(v))
   if (changed) useFaceRefStatusStore.setState({ stale: next })
 }

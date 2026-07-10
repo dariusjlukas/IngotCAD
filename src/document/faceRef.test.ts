@@ -35,6 +35,25 @@ describe('matchFaceRef', () => {
     const r = matchFaceRef(ref([0, 0, 1], 10), [g([0, 0, 1], 12), g([0, 0, 1], 8.1)])
     expect(r.status).toBe('missing')
   })
+
+  it('never lets a big farther face beat a strictly closer small one', () => {
+    // Regression: candidates were sorted by AREA, so the 300mm² plate at
+    // offset 10.5 won while the true face at 9.6 (closer to ref 10) was never
+    // examined. The two closest candidates (9.6 and 10.5) are genuinely
+    // ambiguous — the contract demands 'missing', never a silent wrong bind.
+    const r = matchFaceRef(ref([0, 0, 1], 10), [
+      g([0, 0, 1], 10.5, 300),
+      g([0, 0, 1], 14.9, 200),
+      g([0, 0, 1], 9.6, 100),
+    ])
+    expect(r.status).toBe('missing')
+  })
+
+  it('binds the closest candidate when unambiguous, regardless of area', () => {
+    const r = matchFaceRef(ref([0, 0, 1], 10), [g([0, 0, 1], 9.6, 100), g([0, 0, 1], 14.9, 5000)])
+    expect(r.status).toBe('moved')
+    if (r.status === 'moved') expect(r.local.offset).toBe(9.6)
+  })
 })
 
 describe('composeFaceWorld', () => {

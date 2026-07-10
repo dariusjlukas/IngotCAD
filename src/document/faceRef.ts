@@ -76,7 +76,9 @@ export function matchFaceRef(ref: FaceRef, groups: PlanarFaceGroup[]): FaceRefSt
         dot(g.normal, ref.normal) > MOVED_ANGLE_COS &&
         Math.abs(g.offset - ref.offset) < MOVED_OFFSET_MM,
     )
-    .sort((a, b) => b.area - a.area)
+    // Closest plane wins — sorting by area here would let a big face beat a
+    // strictly closer (more plausible) small one and bind the wrong face.
+    .sort((a, b) => Math.abs(a.offset - ref.offset) - Math.abs(b.offset - ref.offset))
   if (candidates.length === 0) return { status: 'missing' }
   // Unique enough: the runner-up (if any) must be clearly worse in offset.
   if (candidates.length > 1) {

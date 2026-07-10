@@ -43,7 +43,7 @@ export function NumberField({ value, onCommit, step = 1, min, live }: NumberFiel
   /** Parse + clamp the raw text; null when it isn't a usable number yet. */
   const clamp = (raw: string): number | null => {
     const n = parseFloat(raw)
-    if (Number.isNaN(n)) return null
+    if (!Number.isFinite(n)) return null
     return min != null ? Math.max(min, n) : n
   }
 

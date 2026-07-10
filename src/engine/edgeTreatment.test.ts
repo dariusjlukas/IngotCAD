@@ -210,6 +210,42 @@ describe('edgeTreatment evaluation', () => {
     expect(Math.abs(baseVolume - removed - volume) / volume).toBeLessThan(0.02)
   })
 
+  it('a fillet whose reach crosses the revolve axis is skipped with a warning', () => {
+    // Cone base rim: wedge angle ≈11.3°, so a size-2 fillet's tangency setback
+    // k·cosT ≈ 20 crosses the axis of the radius-10 rim even though 2 << 10.
+    // Revolving that profile silently clips it into a part-destroying tool, so
+    // the entry must be skipped instead.
+    const cone = prim('c', {
+      type: 'cylinder',
+      height: 2,
+      radiusBottom: 10,
+      radiusTop: 0.01,
+      segments: 64,
+    })
+    const probe = createEmptyDocument()
+    probe.nodes.c = cone
+    probe.rootIds = ['c']
+    const sBase = evaluateLocal(M, probe, 'c')
+    const mesh = sBase.getMesh()
+    const edges = detectFeatureEdges({ position: mesh.vertProperties, index: mesh.triVerts })
+    const baseVolume = sBase.volume()
+    sBase.delete()
+    const rim = edges.find((e) => e.kind === 'circle' && e.radius! > 5)
+    expect(rim).toBeDefined()
+
+    const { doc, id } = docWithTreatment(cone, [
+      { id: 'e1', kind: 'fillet', size: 2, edge: rim!.signature },
+    ])
+    const warnings: EvalWarning[] = []
+    const solid = evaluateLocal(M, doc, id, (w) => warnings.push(w))
+    const volume = solid.volume()
+    solid.delete()
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].code).toBe('edge-too-large')
+    expect(warnings[0].nodeId).toBe(id)
+    expect(volume).toBeCloseTo(baseVolume, 6)
+  })
+
   it('an unmatched signature warns and leaves the volume unchanged', () => {
     const size = 20
     const k = 1 / Math.sqrt(3)

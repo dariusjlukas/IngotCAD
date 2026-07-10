@@ -120,6 +120,14 @@ export class EngineWorkerClient {
       this.resolveReady()
       return
     }
+    if (msg.type === 'load-error') {
+      // The worker's WASM failed to load and will never post 'ready'. Unblock
+      // `ready` so callers reach the worker and settle with per-request errors
+      // instead of hanging forever behind an unresolved ready promise.
+      toast.error(`Geometry engine failed to load: ${msg.message}`)
+      this.resolveReady()
+      return
+    }
     const job = this.inFlight.get(msg.id)
     if (!job) return
     if (msg.type === 'missing-assets') {

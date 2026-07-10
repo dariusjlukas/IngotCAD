@@ -46,6 +46,12 @@ export function ExprField({ nodeId, path, value, onCommit, min, step = 1 }: Expr
     }
     const asNumber = Number(trimmed)
     if (!Number.isNaN(asNumber)) {
+      // Numeric but non-finite ('Infinity', '1e999'): reject — Infinity corrupts
+      // the document (serializes to null) and poisons the solver.
+      if (!Number.isFinite(asNumber)) {
+        setText(binding ?? format(value))
+        return
+      }
       const clamped = min != null ? Math.max(min, asNumber) : asNumber
       if (binding) {
         // One undo step: drop the binding and write the typed number.

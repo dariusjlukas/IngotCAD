@@ -66,6 +66,11 @@ interface OperationState {
   setValue: (value: number) => void
   /** Extrude only: a signed extent along +normal. Negative auto-flips and stores |value|. */
   setSignedValue: (signed: number) => void
+  /**
+   * Extrude only: a magnitude in the CURRENT direction (what the height field
+   * shows). Positive keeps the flip as-is; negative flips to the other side.
+   */
+  setMagnitude: (magnitude: number) => void
   toggleFlip: () => void
   /** Choose how the result combines with the sketch's source object. */
   setCombine: (combine: CombineMode) => void
@@ -101,6 +106,19 @@ export const useOperationStore = create<OperationState>((set, get) => ({
         ...s.pending,
         flip: signed < 0,
         value: clampValue('extrude', Math.abs(signed)),
+      }
+      return { pending: { ...next, combine: autoCombine(next) } }
+    }),
+  setMagnitude: (magnitude) =>
+    set((s) => {
+      if (!s.pending) return {}
+      if (s.pending.mode !== 'extrude') {
+        return { pending: { ...s.pending, value: clampValue('revolve', magnitude) } }
+      }
+      const next = {
+        ...s.pending,
+        flip: magnitude < 0 ? !s.pending.flip : s.pending.flip,
+        value: clampValue('extrude', Math.abs(magnitude)),
       }
       return { pending: { ...next, combine: autoCombine(next) } }
     }),

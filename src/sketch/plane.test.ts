@@ -141,4 +141,26 @@ describe('resolvePlaneDefinition', () => {
     expect(p.origin).toEqual([1, 2, 3])
     expectOrthonormal(p)
   })
+
+  it('three points collinear along Z still yield an orthonormal basis', () => {
+    // Regression: the fallback normal is +Z here, and a→b is ALSO +Z, so the
+    // re-orthogonalization used to zero out U and return a singular basis.
+    const p = resolvePlaneDefinition({
+      kind: 'threePoints',
+      a: [0, 0, 0],
+      b: [0, 0, 10],
+      c: [0, 0, 20],
+    })
+    expectOrthonormal(p)
+  })
+
+  it('three identical points still yield an orthonormal basis', () => {
+    const p = resolvePlaneDefinition({
+      kind: 'threePoints',
+      a: [3, 3, 3],
+      b: [3, 3, 3],
+      c: [3, 3, 3],
+    })
+    expectOrthonormal(p)
+  })
 })

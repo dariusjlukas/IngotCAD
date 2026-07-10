@@ -313,7 +313,9 @@ export function SketchCanvas() {
   const commitEdit = () => {
     if (editing) {
       const v = parseFloat(editText)
-      if (!Number.isNaN(v)) st.getState().setDimensionValue(editing, v)
+      // isFinite, not !isNaN: '1e999' parses to Infinity, which would NaN-poison
+      // the solver irrecoverably (there is no undo inside sketch mode).
+      if (Number.isFinite(v)) st.getState().setDimensionValue(editing, v)
     }
     setEditing(null)
   }

@@ -68,6 +68,12 @@ const toWorld = (local: Vec3, matrixWorld: THREE.Matrix4): [number, number, numb
   return [w.x, w.y, w.z]
 }
 
+// Normals transform by the inverse-transpose (normal matrix), NOT the plain
+// upper-3×3 — transformDirection skews them under non-uniform scale.
+// applyNormalMatrix normalizes. Same pattern as faceRef.composeFaceWorld.
+const normalToWorld = (n: THREE.Vector3, matrixWorld: THREE.Matrix4): THREE.Vector3 =>
+  n.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(matrixWorld))
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
 export function NodeView({ id }: { id: NodeId }) {
@@ -233,7 +239,7 @@ export function NodeView({ id }: { id: NodeId }) {
           // Non-uniform scale turns the circle into an ellipse — fall back to
           // the straight segment when the world radii disagree.
           if (Math.abs(ru - rv) <= 0.01 * Math.max(ru, rv)) {
-            const wn = new THREE.Vector3(...circle.axis).transformDirection(mw).normalize()
+            const wn = normalToWorld(new THREE.Vector3(...circle.axis), mw)
             return {
               kind: 'circle',
               center: wc,
@@ -306,7 +312,7 @@ export function NodeView({ id }: { id: NodeId }) {
         })
       else if (target.kind === 'face') {
         const n = e.face
-          ? e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
+          ? normalToWorld(e.face.normal, e.object.matrixWorld)
           : new THREE.Vector3(0, 0, 1)
         // World-space area: transform the local face soup before measuring.
         const world = new Float32Array(target.positions.length)
@@ -332,9 +338,7 @@ export function NodeView({ id }: { id: NodeId }) {
     const pb = usePlaneBuilderStore.getState()
     if (pb.tool) {
       const worldNormal = () =>
-        e.face
-          ? e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
-          : new THREE.Vector3(0, 0, 1)
+        e.face ? normalToWorld(e.face.normal, e.object.matrixWorld) : new THREE.Vector3(0, 0, 1)
       if (pb.tool === 'threePoints') {
         const lv =
           e.faceIndex != null
@@ -365,7 +369,7 @@ export function NodeView({ id }: { id: NodeId }) {
     const sk = useSketchStore.getState()
     if (sk.choosing) {
       if (e.face) {
-        const n = e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
+        const n = normalToWorld(e.face.normal, e.object.matrixWorld)
         sk.chooseFace([e.point.x, e.point.y, e.point.z], [n.x, n.y, n.z], id, faceRefAt(e))
       }
       return

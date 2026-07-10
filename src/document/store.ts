@@ -103,14 +103,19 @@ function collectSubtree(doc: CadDocument, id: NodeId, acc: Set<NodeId>): void {
   if (node && hasChildren(node)) node.childIds.forEach((c) => collectSubtree(doc, c, acc))
 }
 
-/** Remove any container nodes that have ended up with no children. */
-function cleanupEmptyContainers(doc: CadDocument): void {
+/**
+ * Remove any container nodes that have ended up with no children. Removed ids
+ * are added to `removed` so the caller can prune their bindings too — a
+ * container deleted here is just as gone as one the user deleted directly.
+ */
+function cleanupEmptyContainers(doc: CadDocument, removed?: Set<NodeId>): void {
   let changed = true
   while (changed) {
     changed = false
     for (const node of Object.values(doc.nodes)) {
       if (hasChildren(node) && node.childIds.length === 0) {
         delete doc.nodes[node.id]
+        removed?.add(node.id)
         doc.rootIds = doc.rootIds.filter((id) => id !== node.id)
         for (const other of Object.values(doc.nodes)) {
           if (hasChildren(other)) other.childIds = other.childIds.filter((c) => c !== node.id)
@@ -930,7 +935,9 @@ export const useCadStore = create<CadState>()((set, get) => {
         for (const node of Object.values(doc.nodes)) {
           if (hasChildren(node)) node.childIds = node.childIds.filter((c) => !toDelete.has(c))
         }
-        cleanupEmptyContainers(doc)
+        // Cascade-deleted empty containers join toDelete so their bindings
+        // are pruned too (a dangling binding would live in every saved file).
+        cleanupEmptyContainers(doc, toDelete)
         pruneBindings(doc, toDelete)
       })
       set((state) => ({ selectedIds: state.selectedIds.filter((id) => state.doc.nodes[id]) }))
@@ -1008,7 +1015,9 @@ export const useCadStore = create<CadState>()((set, get) => {
           n.transform = newLocals.get(id)!
           if (destParentId === null) n.role = 'solid' // role only applies inside a group
         }
-        cleanupEmptyContainers(doc)
+        const removed = new Set<NodeId>()
+        cleanupEmptyContainers(doc, removed)
+        if (removed.size > 0) pruneBindings(doc, removed)
       })
       set((state) => ({ selectedIds: state.selectedIds.filter((id) => state.doc.nodes[id]) }))
     },

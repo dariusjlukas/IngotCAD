@@ -681,13 +681,21 @@ function classifyChain(pts: Vec3[], closed: boolean, sample: SharpEdge): Feature
 export const MATCH_DIR_COS = Math.cos((5 * Math.PI) / 180)
 export const MATCH_LINE_DIST = 0.1
 export const MATCH_OVERLAP = 0.5
+/** Loose-fallback position gate: proportional to the edge size so a param edit
+ *  (an edge drifting a few mm) still rebinds, but a parallel edge on another
+ *  object does not. */
+export const MATCH_LOOSE_DIST = (size: number): number => Math.max(2, 0.5 * size)
+/** Loose-fallback radius gate for circles. */
+export const MATCH_LOOSE_RADIUS = (r: number): number => Math.max(1, 0.5 * r)
 
 /**
  * Find the detected edge a stored signature refers to. Tolerant by design so
  * child param edits and sibling treatments don't orphan entries:
  * - lines match by direction + containment in the supporting line + interval
- *   overlap; fallback: the unique candidate with matching direction AND normals.
- * - circles match by axis + center + radius; fallback: the unique axis match.
+ *   overlap; fallback: the unique candidate with matching direction AND normals
+ *   whose midpoint stayed within a length-proportional distance.
+ * - circles match by axis + center + radius; fallback: the unique axis match
+ *   with a nearby center and a compatible radius.
  * Ambiguity returns null (surfaced as a warning), never a guess.
  */
 export function matchEdge(
@@ -719,7 +727,9 @@ export function matchEdge(
       if (c.kind !== 'line' || !c.a || !c.b) return false
       const cd = normalize(sub(c.b, c.a))
       if (Math.abs(dot(cd, sig.dir)) < MATCH_DIR_COS) return false
-      return normalsMatch(sig.normals, c.normals)
+      if (!normalsMatch(sig.normals, c.normals)) return false
+      const mid = scale(add(c.a, c.b), 0.5)
+      return norm(sub(mid, sig.point)) <= MATCH_LOOSE_DIST(sig.length)
     })
     return loose.length === 1 ? { edge: loose[0], exact: false } : null
   }
@@ -733,9 +743,14 @@ export function matchEdge(
   })
   if (exact.length === 1) return { edge: exact[0], exact: true }
   if (exact.length > 1) return null
-  const loose = candidates.filter(
-    (c) => c.kind === 'circle' && c.axis != null && Math.abs(dot(c.axis, sig.dir)) >= MATCH_DIR_COS,
-  )
+  const loose = candidates.filter((c) => {
+    if (c.kind !== 'circle' || !c.center || !c.axis || c.radius == null) return false
+    if (Math.abs(dot(c.axis, sig.dir)) < MATCH_DIR_COS) return false
+    return (
+      norm(sub(c.center, sig.point)) <= MATCH_LOOSE_DIST(r) &&
+      Math.abs(c.radius - r) <= MATCH_LOOSE_RADIUS(r)
+    )
+  })
   return loose.length === 1 ? { edge: loose[0], exact: false } : null
 }
 

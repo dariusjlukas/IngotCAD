@@ -80,8 +80,11 @@ export async function exportStlFile(): Promise<void> {
   }
   const filename = projectFilename('stl')
   try {
-    await exportStl(useCadStore.getState().doc, filename)
-    toast.success(`Exported ${filename}`)
+    if (await exportStl(useCadStore.getState().doc, filename)) {
+      toast.success(`Exported ${filename}`)
+    } else {
+      toast.error('Nothing to export — the model evaluates to empty geometry.')
+    }
   } catch (err) {
     toast.error(`Export failed: ${err}`)
   }
@@ -94,8 +97,11 @@ export async function export3mfFile(): Promise<void> {
   }
   const filename = projectFilename('3mf')
   try {
-    await export3mf(useCadStore.getState().doc, filename)
-    toast.success(`Exported ${filename}`)
+    if (await export3mf(useCadStore.getState().doc, filename)) {
+      toast.success(`Exported ${filename}`)
+    } else {
+      toast.error('Nothing to export — the model evaluates to empty geometry.')
+    }
   } catch (err) {
     toast.error(`Export failed: ${err}`)
   }

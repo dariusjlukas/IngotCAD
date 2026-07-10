@@ -215,3 +215,31 @@ describe('setNodeTransform (scale baking)', () => {
     expect(store().doc.nodes[g].transform.scale).toEqual([2, 2, 2])
   })
 })
+
+describe('binding pruning regressions', () => {
+  it('prunes bindings of containers cascade-deleted by deleting their last child', () => {
+    const a = store().addPrimitive('box')
+    const s = store().shellNodes([a], 2, false)!
+    expect(store().setFieldBinding(s, 'thickness', '2.5')).toBe(true)
+    expect(store().doc.bindings[`${s}:thickness`]).toBe('2.5')
+
+    // Deleting the shell's only child cascade-deletes the (now empty) shell;
+    // its binding must not survive into every future save of the document.
+    store().deleteNodes([a])
+    expect(store().doc.nodes[s]).toBeUndefined()
+    expect(store().doc.bindings).toEqual({})
+  })
+
+  it('prunes bindings of containers emptied by moveNodes', () => {
+    const a = store().addPrimitive('box')
+    const b = store().addPrimitive('box')
+    const s = store().shellNodes([a], 2, false)!
+    expect(store().setFieldBinding(s, 'thickness', '2.5')).toBe(true)
+
+    // Move the shell's only child next to the other root: the empty shell is
+    // cleaned up and its binding must go with it.
+    store().moveNodes([a], b, 'after')
+    expect(store().doc.nodes[s]).toBeUndefined()
+    expect(store().doc.bindings).toEqual({})
+  })
+})

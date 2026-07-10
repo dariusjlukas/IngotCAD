@@ -56,6 +56,9 @@ type Weight = (id: PointId) => number
 
 function project(data: SketchData, c: Constraint, w: Weight): void {
   const P = data.points
+  // A non-finite target (e.g. Infinity from a hostile file) would NaN-poison
+  // every point it touches within two sweeps — skip the constraint instead.
+  if ('value' in c && !Number.isFinite(c.value)) return
   switch (c.kind) {
     case 'coincident':
       coincident(P[c.a], P[c.b], w(c.a), w(c.b))
@@ -78,12 +81,14 @@ function project(data: SketchData, c: Constraint, w: Weight): void {
       break
     }
     case 'parallel': {
+      if (!P[c.a] || !P[c.b] || !P[c.c] || !P[c.d]) return
       const t = lineMean(angle(P[c.a], P[c.b]), angle(P[c.c], P[c.d]))
       rotateToward(P[c.a], P[c.b], w(c.a), w(c.b), t)
       rotateToward(P[c.c], P[c.d], w(c.c), w(c.d), t)
       break
     }
     case 'perpendicular': {
+      if (!P[c.a] || !P[c.b] || !P[c.c] || !P[c.d]) return
       const base = lineMean(angle(P[c.a], P[c.b]), angle(P[c.c], P[c.d]) - Math.PI / 2)
       rotateToward(P[c.a], P[c.b], w(c.a), w(c.b), base)
       rotateToward(P[c.c], P[c.d], w(c.c), w(c.d), base + Math.PI / 2)
@@ -199,7 +204,7 @@ function axisAlign(a: SPoint, b: SPoint, wa: number, wb: number, axis: 'x' | 'y'
 
 function distance(a: SPoint, b: SPoint, wa: number, wb: number, target: number): void {
   const sw = wa + wb
-  if (!a || !b || sw === 0) return
+  if (!a || !b || sw === 0 || !Number.isFinite(target)) return
   let dx = b.x - a.x
   let dy = b.y - a.y
   let d = Math.hypot(dx, dy)
