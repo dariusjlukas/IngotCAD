@@ -22,6 +22,7 @@ import type {
   PatternSpec,
   PrimitiveParams,
   Role,
+  Transform,
   Vec2,
 } from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
@@ -41,6 +42,15 @@ type Wasm = ManifoldToplevel
 /** Collector for non-fatal evaluation warnings (edge treatments that no longer
  *  bind, etc.). Optional everywhere; defaults to dropping them. */
 export type WarnFn = (w: EvalWarning) => void
+
+/**
+ * Per-node transform replacements (parent-relative), used to evaluate with the
+ * RESOLVED placement of auto-following face-attached nodes so exports and
+ * section projections match what the viewport renders. The document itself
+ * keeps the stored snapshot; evaluation stays a pure function of its inputs —
+ * the inputs just include the overrides.
+ */
+export type TransformOverrides = Record<NodeId, Transform>
 
 interface RoledSolid {
   role: Role
@@ -269,7 +279,13 @@ function combineShell(
   return result
 }
 
-export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId, warn?: WarnFn): Manifold {
+export function evaluateLocal(
+  M: Wasm,
+  doc: CadDocument,
+  id: NodeId,
+  warn?: WarnFn,
+  overrides?: TransformOverrides,
+): Manifold {
   const node = doc.nodes[id]
   if (!node) throw new Error(`Unknown node: ${id}`)
   if (node.kind === 'primitive') return buildPrimitive(M, doc, node.params)
@@ -279,7 +295,7 @@ export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId, warn?: Warn
     const child = doc.nodes[cid]
     if (!child) continue
     try {
-      children.push({ role: child.role, solid: evaluate(M, doc, cid, warn) })
+      children.push({ role: child.role, solid: evaluate(M, doc, cid, warn, overrides) })
     } catch (err) {
       // Free the siblings evaluated before the failure: computeMeshRaw catches
       // the rethrow and returns EMPTY_MESH, but without this every
@@ -311,9 +327,15 @@ export function evaluateLocal(M: Wasm, doc: CadDocument, id: NodeId, warn?: Warn
   }
 }
 
-export function evaluate(M: Wasm, doc: CadDocument, id: NodeId, warn?: WarnFn): Manifold {
-  const local = evaluateLocal(M, doc, id, warn)
-  const tr = doc.nodes[id].transform
+export function evaluate(
+  M: Wasm,
+  doc: CadDocument,
+  id: NodeId,
+  warn?: WarnFn,
+  overrides?: TransformOverrides,
+): Manifold {
+  const local = evaluateLocal(M, doc, id, warn, overrides)
+  const tr = overrides?.[id] ?? doc.nodes[id].transform
   if (isIdentityTransform(tr)) return local
   const result = local.transform(transformToMat4Array(tr) as unknown as Mat4)
   local.delete()
@@ -361,10 +383,13 @@ export function computeExportRaw(
   doc: CadDocument,
   rootIds: NodeId[],
   warn?: WarnFn,
+  overrides?: TransformOverrides,
 ): RawMesh {
   let result: Manifold | null = null
   try {
-    const solids = rootIds.filter((id) => doc.nodes[id]).map((id) => evaluate(M, doc, id, warn))
+    const solids = rootIds
+      .filter((id) => doc.nodes[id])
+      .map((id) => evaluate(M, doc, id, warn, overrides))
     result = unionAll(M, solids)
     return meshToRaw(result.getMesh())
   } catch (err) {
@@ -421,13 +446,14 @@ export function projectSceneRaw(
   doc: CadDocument,
   rootIds: NodeId[],
   invMatrix: number[],
+  overrides?: TransformOverrides,
 ): Vec2[][][] {
   const groups: Vec2[][][] = []
   for (const id of rootIds) {
     if (!doc.nodes[id]) continue
     let solid: Manifold | null = null
     try {
-      solid = evaluate(M, doc, id)
+      solid = evaluate(M, doc, id, undefined, overrides)
       const polys = sectionSolid(solid, invMatrix)
       if (polys.length) groups.push(polys)
     } catch (err) {

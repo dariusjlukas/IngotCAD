@@ -1,18 +1,26 @@
 /**
- * Local autosave: mirror the current document to localStorage (debounced) so a
- * refresh or crash doesn't lose work, and restore it on startup. Reuses the
- * project serialization. An empty document clears the slot, so "New" wipes it.
+ * Local autosave: mirror the current document to IndexedDB (debounced) so a
+ * refresh or crash doesn't lose work, and restore it on startup. The document
+ * is stored via structured clone — typed arrays (mesh assets) store natively,
+ * with no JSON serialization and no localStorage quota to hit. An empty
+ * document clears the slot, so "New" wipes it.
  */
-import { deserializeDocument, serializeDocument } from '../document/serialization'
+import { deserializeDocument } from '../document/serialization'
 import { useCadStore } from '../document/store'
 import type { CadDocument } from '../document/types'
 
-const KEY = 'ingot-autosave'
+/** Pre-IndexedDB autosave slot: { name, document } with a JSON-serialized document. */
+const LEGACY_KEY = 'ingot-autosave'
+const DB_NAME = 'ingot'
+const DB_VERSION = 1
+const STORE_NAME = 'autosave'
+const RECORD_KEY = 'latest'
 const DEBOUNCE_MS = 1000
 
-interface AutosavePayload {
+interface AutosaveRecord {
   name: string
-  document: string
+  doc: CadDocument
+  savedAt: number
 }
 
 /**
@@ -30,41 +38,96 @@ export function isDocumentEmpty(doc: CadDocument): boolean {
   )
 }
 
-function write(): void {
-  const { doc, documentName } = useCadStore.getState()
-  try {
-    if (isDocumentEmpty(doc)) {
-      localStorage.removeItem(KEY)
-      return
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE_NAME)) {
+        req.result.createObjectStore(STORE_NAME)
+      }
     }
-    const payload: AutosavePayload = { name: documentName, document: serializeDocument(doc) }
-    localStorage.setItem(KEY, JSON.stringify(payload))
-  } catch {
-    // Quota exceeded (e.g. a large imported mesh) or serialization failure —
-    // autosave is best-effort, so drop it silently.
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'))
+  })
+}
+
+/** Run one request against the autosave store and resolve with its result. */
+async function withStore<T>(
+  mode: IDBTransactionMode,
+  fn: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
+  const db = await openDb()
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const req = fn(db.transaction(STORE_NAME, mode).objectStore(STORE_NAME))
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'))
+    })
+  } finally {
+    db.close()
   }
 }
 
-/** Begin mirroring document/name changes to localStorage. Returns an unsubscribe. */
+/** Write the current document to the autosave slot immediately. Exported for tests. */
+export async function writeAutosave(): Promise<void> {
+  const { doc, documentName } = useCadStore.getState()
+  try {
+    if (isDocumentEmpty(doc)) {
+      await withStore('readwrite', (store) => store.delete(RECORD_KEY))
+      return
+    }
+    const record: AutosaveRecord = { name: documentName, doc, savedAt: Date.now() }
+    await withStore('readwrite', (store) => store.put(record, RECORD_KEY))
+  } catch {
+    // IndexedDB unavailable (e.g. some private-browsing modes) or a write
+    // failure — autosave is best-effort, so drop it silently.
+  }
+}
+
+/** Begin mirroring document/name changes to IndexedDB. Returns an unsubscribe. */
 export function startAutosave(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
   return useCadStore.subscribe((state, prev) => {
     if (state.doc === prev.doc && state.documentName === prev.documentName) return
     if (timer) clearTimeout(timer)
-    timer = setTimeout(write, DEBOUNCE_MS)
+    timer = setTimeout(() => void writeAutosave(), DEBOUNCE_MS)
   })
 }
 
+/**
+ * One-time migration from the old localStorage slot: copy it into IndexedDB
+ * first, then remove the key, so the legacy autosave can't be lost even if
+ * the restore itself is skipped (e.g. work already in progress).
+ */
+async function migrateLegacyRecord(): Promise<AutosaveRecord | undefined> {
+  const raw = localStorage.getItem(LEGACY_KEY)
+  if (!raw) return undefined
+  const { name, document } = JSON.parse(raw) as { name: string; document: string }
+  const record: AutosaveRecord = {
+    name,
+    doc: deserializeDocument(document),
+    savedAt: Date.now(),
+  }
+  await withStore('readwrite', (store) => store.put(record, RECORD_KEY))
+  localStorage.removeItem(LEGACY_KEY)
+  return record
+}
+
+async function readRecord(): Promise<AutosaveRecord | undefined> {
+  const record = (await withStore('readonly', (store) => store.get(RECORD_KEY))) as
+    | AutosaveRecord
+    | undefined
+  return record ?? (await migrateLegacyRecord())
+}
+
 /** Restore a previous session if one exists and the current document is empty. */
-export function restoreAutosave(): boolean {
+export async function restoreAutosave(): Promise<boolean> {
   try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return false
-    const { name, document } = JSON.parse(raw) as AutosavePayload
-    const doc = deserializeDocument(document)
-    if (isDocumentEmpty(doc)) return false
+    const record = await readRecord()
+    if (!record) return false
+    if (isDocumentEmpty(record.doc)) return false
     if (!isDocumentEmpty(useCadStore.getState().doc)) return false // don't clobber work
-    useCadStore.getState().loadDocument(doc, name || 'Untitled')
+    useCadStore.getState().loadDocument(record.doc, record.name || 'Untitled')
     return true
   } catch {
     return false

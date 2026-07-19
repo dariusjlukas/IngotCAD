@@ -173,6 +173,14 @@ export interface FaceRef {
   nodeId: NodeId
   normal: Vec3
   offset: number
+  /**
+   * The attached plane's full frame in the source's LOCAL space, captured at
+   * pick time. Lets the resolver track in-plane translation/rotation of the
+   * source — invisible to the plane equation above. Optional and additive:
+   * refs without it (pre-associativity documents) resolve with
+   * plane-equation-only transport.
+   */
+  frame?: SketchPlane
 }
 
 /** The editable source of a sketch-based solid: the sketch and the plane it's on. */

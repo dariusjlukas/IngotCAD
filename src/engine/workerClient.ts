@@ -21,10 +21,11 @@ import type {
   EvalWarning,
   MeasureInfo,
 } from './protocol'
+import type { MeshQuality } from './quality'
 import { jobFinished, jobStarted } from './engineStatusStore'
 import { setEvalWarnings } from './evalWarningsStore'
 import { toast } from '../ui/toastStore'
-import type { CadDocument, DistributiveOmit, NodeId, Vec2 } from '../document/types'
+import type { CadDocument, DistributiveOmit, NodeId, Transform, Vec2 } from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
 
 interface InFlight {
@@ -52,16 +53,22 @@ export class EngineWorkerClient {
     this.spawn()
   }
 
-  computeMesh(doc: CadDocument, id: NodeId): Promise<RawMesh> {
+  computeMesh(doc: CadDocument, id: NodeId, opts?: { quality?: MeshQuality }): Promise<RawMesh> {
+    // Draft and full requests share a key on purpose: a full-quality release
+    // request displaces any stale queued draft for the same node.
     return this.queue.submit(`mesh:${id}`, () =>
-      this.call<RawMesh>({ method: 'computeMesh', nodeId: id }, doc, id),
+      this.call<RawMesh>({ method: 'computeMesh', nodeId: id, quality: opts?.quality }, doc, id),
     )
   }
 
-  computeExportMesh(doc: CadDocument, rootIds: NodeId[]): Promise<RawMesh> {
+  computeExportMesh(
+    doc: CadDocument,
+    rootIds: NodeId[],
+    overrides?: Record<NodeId, Transform>,
+  ): Promise<RawMesh> {
     // Exports are explicit user actions — never coalesced away.
     return this.queue.submit(null, () =>
-      this.call<RawMesh>({ method: 'computeExportMesh', rootIds }, doc),
+      this.call<RawMesh>({ method: 'computeExportMesh', rootIds, overrides }, doc),
     )
   }
 
@@ -71,9 +78,14 @@ export class EngineWorkerClient {
     )
   }
 
-  projectScene(doc: CadDocument, rootIds: NodeId[], invMatrix: number[]): Promise<Vec2[][][]> {
+  projectScene(
+    doc: CadDocument,
+    rootIds: NodeId[],
+    invMatrix: number[],
+    overrides?: Record<NodeId, Transform>,
+  ): Promise<Vec2[][][]> {
     return this.queue.submit('projectScene', () =>
-      this.call<Vec2[][][]>({ method: 'projectScene', rootIds, invMatrix }, doc),
+      this.call<Vec2[][][]>({ method: 'projectScene', rootIds, invMatrix, overrides }, doc),
     )
   }
 

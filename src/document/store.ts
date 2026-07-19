@@ -31,6 +31,8 @@ import type {
 import { createEmptyDocument, hasChildren, IDENTITY_TRANSFORM } from './types'
 import { transformToMatrix4, matrix4ToTransform } from '../geometry/transform'
 import { bakeScaleIntoParams } from './scaleBake'
+import { frameInSourceLocal } from './resolve'
+import { currentRootOverrides, useResolvedStore } from './resolvedStore'
 import { applyAllBindings, bindingKey, pruneBindings, setByPath } from './bindings'
 import { evaluateExpression, isValidName, resolveVariables } from './expressions'
 import { cleanContours } from '../sketch/geometry'
@@ -1095,6 +1097,37 @@ export const useCadStore = create<CadState>()((set, get) => {
       mutate((doc) => {
         const node = doc.nodes[id]
         if (!node) return
+        // Re-anchor a face-attached node that is currently auto-following its
+        // source face: the committed transform was authored against the
+        // RESOLVED placement (that's where the gizmo/object sits), so the
+        // acknowledged snapshot must move with it in the same undo step — or
+        // the next resolve would apply the face's delta a second time.
+        if (node.kind === 'primitive') {
+          const p = node.params
+          const resolved = useResolvedStore.getState().dependents[id]
+          if (
+            (p.type === 'extrusion' || p.type === 'revolution') &&
+            p.sketch?.faceRef &&
+            resolved?.status === 'moved'
+          ) {
+            p.sketch.plane = resolved.plane
+            const local = resolved.local
+            if (local) {
+              p.sketch.faceRef = {
+                ...p.sketch.faceRef,
+                normal: local.normal,
+                offset: local.offset,
+                frame:
+                  frameInSourceLocal(
+                    doc,
+                    p.sketch.faceRef.nodeId,
+                    resolved.plane,
+                    currentRootOverrides(),
+                  ) ?? p.sketch.faceRef.frame,
+              }
+            }
+          }
+        }
         if (node.kind === 'primitive') {
           const baked = bakeScaleIntoParams(node.params, transform.scale)
           if (baked) {

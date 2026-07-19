@@ -5,6 +5,7 @@
 import { useEffect } from 'react'
 import { useSketchStore } from './sketchStore'
 import { useCadStore } from '../document/store'
+import { resolvedFacePlane, useResolvedStore } from '../document/resolvedStore'
 import { resolvePlaneDefinition } from './plane'
 
 export function PlanePicker() {
@@ -13,6 +14,7 @@ export function PlanePicker() {
   const cancel = useSketchStore((s) => s.cancel)
   const planeOrder = useCadStore((s) => s.doc.planeOrder)
   const planes = useCadStore((s) => s.doc.planes)
+  const resolvedDeps = useResolvedStore((s) => s.dependents)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -54,7 +56,11 @@ export function PlanePicker() {
                 className={btn}
                 title="Sketch on this construction plane"
                 onClick={() =>
-                  chooseConstructionPlane(resolvePlaneDefinition(p.definition), p.name)
+                  chooseConstructionPlane(
+                    resolvedFacePlane(resolvedDeps[id], p.definition) ??
+                      resolvePlaneDefinition(p.definition),
+                    p.name,
+                  )
                 }
               >
                 {p.name}

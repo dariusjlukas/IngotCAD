@@ -4,7 +4,7 @@ import type { ManifoldToplevel } from 'manifold-3d'
 import { computeExportRaw, measureSolid, projectSceneRaw } from './evaluate'
 import { cardinalPlane, planeFromFace, worldToLocalMatrix } from '../sketch/plane'
 import { createEmptyDocument, IDENTITY_TRANSFORM } from '../document/types'
-import type { CadDocument, CadNode, PrimitiveParams, Vec2 } from '../document/types'
+import type { CadDocument, CadNode, PrimitiveParams, Vec2, Vec3 } from '../document/types'
 
 let M: ManifoldToplevel
 
@@ -478,6 +478,23 @@ describe('sketch-plane sectioning (projectSceneRaw)', () => {
     )
     expect(measureSolid(M, doc2, 'g').volume).toBeCloseTo(64000, 0)
     expect(measureSolid(M, doc2, 'b').volume).toBeCloseTo(64000, 0)
+  })
+
+  it('applies transform overrides to export and projection (resolved placement)', () => {
+    const doc = docOf([prim('b', { type: 'box', size: [20, 20, 20] })], ['b'])
+    const overrides = {
+      b: { position: [50, 0, 0] as Vec3, rotationDeg: [0, 0, 0] as Vec3, scale: [1, 1, 1] as Vec3 },
+    }
+    const raw = computeExportRaw(M, doc, ['b'], undefined, overrides)
+    // Every vertex sits in the shifted position, not the stored one.
+    for (let i = 0; i < raw.position.length; i += 3) {
+      expect(raw.position[i]).toBeGreaterThanOrEqual(39.999)
+    }
+    // Without overrides the stored (origin) placement is used.
+    const plain = computeExportRaw(M, doc, ['b'])
+    let minX = Infinity
+    for (let i = 0; i < plain.position.length; i += 3) minX = Math.min(minX, plain.position[i])
+    expect(minX).toBeCloseTo(-10, 4)
   })
 
   it("honors a child's hole role inside pattern and shell nodes", () => {

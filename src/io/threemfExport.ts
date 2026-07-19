@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'three/addons/libs/fflate.module.js'
 import { exportTo3MF } from 'three-3mf-exporter'
 import type { CadDocument } from '../document/types'
+import { currentRootOverrides } from '../document/resolvedStore'
 import { engine } from '../engine/engine'
 import { rawMeshToGeometry } from '../geometry/manifoldToThree'
 import { downloadBlob } from './download'
@@ -47,7 +48,8 @@ export async function export3mf(doc: CadDocument, filename = 'model.3mf'): Promi
   const visibleRoots = doc.rootIds.filter((id) => doc.nodes[id]?.visible)
   if (visibleRoots.length === 0) return false
 
-  const raw = await engine.computeExportMesh(doc, visibleRoots)
+  // Resolved face-attachment placement, so the file matches the viewport.
+  const raw = await engine.computeExportMesh(doc, visibleRoots, currentRootOverrides())
   if (raw.index.length === 0) return false
 
   const geometry = rawMeshToGeometry(raw)

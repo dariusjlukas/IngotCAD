@@ -205,9 +205,10 @@ export default function App() {
   useKeyboardShortcuts()
   useSuppressNativeContextMenu()
 
-  // Restore the last session, then mirror future changes to localStorage.
+  // Restore the last session (async — IndexedDB; its don't-clobber guard skips
+  // the load if work has already started), and mirror future changes back.
   useEffect(() => {
-    restoreAutosave()
+    void restoreAutosave()
     return startAutosave()
   }, [])
 

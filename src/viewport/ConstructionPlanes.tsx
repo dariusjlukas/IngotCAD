@@ -13,6 +13,7 @@ import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import { Edges, TransformControls } from '@react-three/drei'
 import { useCadStore } from '../document/store'
+import { resolvedFacePlane, useResolvedStore } from '../document/resolvedStore'
 import { useSketchStore } from '../sketch/sketchStore'
 import { usePlaneBuilderStore } from './planeBuilderStore'
 import { localToWorldMatrix, resolvePlaneDefinition } from '../sketch/plane'
@@ -28,6 +29,7 @@ function PlaneView({ id }: { id: string }) {
   const choosing = useSketchStore((s) => s.choosing)
   const sketching = useSketchStore((s) => s.active)
   const buildingPlane = usePlaneBuilderStore((s) => s.tool !== null)
+  const resolvedDep = useResolvedStore((s) => s.dependents[id])
   const [hovered, setHovered] = useState(false)
   const [meshObj, setMeshObj] = useState<THREE.Mesh | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,7 +52,9 @@ function PlaneView({ id }: { id: string }) {
       if (e.value) return
       const cur = useCadStore.getState().doc.planes[id]
       if (!cur || (cur.definition.kind !== 'offset' && cur.definition.kind !== 'face')) return
-      const sp = resolvePlaneDefinition(cur.definition)
+      const sp =
+        resolvedFacePlane(useResolvedStore.getState().dependents[id], cur.definition) ??
+        resolvePlaneDefinition(cur.definition)
       const delta = meshObj.position
         .clone()
         .sub(new THREE.Vector3(...sp.origin))
@@ -67,7 +71,10 @@ function PlaneView({ id }: { id: string }) {
 
   if (!plane || !plane.visible) return null
 
-  const sketchPlane = resolvePlaneDefinition(plane.definition)
+  // While auto-following a moved source face, render (and sketch on) the
+  // resolved plane; the stored definition remains the serialized snapshot.
+  const sketchPlane =
+    resolvedFacePlane(resolvedDep, plane.definition) ?? resolvePlaneDefinition(plane.definition)
   const m = new THREE.Matrix4().fromArray(localToWorldMatrix(sketchPlane))
   const position = new THREE.Vector3()
   const quaternion = new THREE.Quaternion()

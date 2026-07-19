@@ -1,7 +1,8 @@
 # Design: Full face associativity (parametric regeneration)
 
-Status: **proposed** — design only, not scheduled. Written 2026-07-07 against
-schema v2 (`src/document/types.ts`).
+Status: **Stage A implemented** (2026-07-10) — see §7 for what shipped and the
+deliberate cuts. Stages B (originalID face identity) and C (badges/prefs)
+remain as designed. Originally written 2026-07-07 against schema v2.
 
 ## 1. Problem
 
@@ -252,3 +253,36 @@ Risks worth respecting: the Stage A cache-key change touches the app's
 performance spine — land it behind exhaustive hash tests before wiring the
 viewport; and the frame-transport math (in-plane anchoring) is the subtlest
 piece — write its tests first.
+
+## 7. Stage A as shipped (2026-07-10)
+
+Implemented in [resolve.ts](../src/document/resolve.ts) (pure resolver + tests),
+[resolvedStore.ts](../src/document/resolvedStore.ts) (transient frames),
+[FaceRefMonitor.tsx](../src/document/FaceRefMonitor.tsx) (now resolver-driven),
+plus wiring in NodeView / ConstructionPlanes / PlanePicker / the engine
+protocol. Two refinements over the original design, and two deliberate cuts:
+
+- **Delta composition instead of frame replacement.** The resolved placement is
+  `T_resolved = Δ ∘ T_stored`, where Δ maps the stored snapshot plane to the
+  re-matched plane. Nothing moved ⇒ Δ = identity ⇒ resolved === stored, and a
+  user's manual gizmo offset survives because it lives inside `T_stored`.
+- **Attach-time local frames.** `FaceRef` gained an optional `frame` (the
+  attached plane in the source's LOCAL space, captured at pick time). This is
+  what lets the resolver see in-plane source translation/rotation — invisible
+  to the plane equation. Additive field, no schema bump; legacy refs resolve
+  with equation-only transport (they can't follow in-plane motion — the §5
+  limitation test pins this).
+- **Re-anchor on explicit transform edits.** `setNodeTransform` on a following
+  node refreshes the snapshot plane + faceRef in the same undo step; without
+  this, a gizmo commit authored against the resolved placement would get the
+  face delta applied twice on the next resolve.
+- **Cut: only top-level dependents auto-follow.** Nested face-attached nodes
+  (inside groups/booleans) resolve and surface status but keep their stored
+  placement — the same override set drives rendering AND exports
+  (`rootOverrides`), so what you see is always what you print. Extending
+  overrides into `computeMesh` requires folding them into the cache key
+  (fullHash ⊕ override) as designed in §3.1 — deferred until nesting proves
+  common.
+- **Cut: 'moved' no longer toasts.** Auto-following is visible on screen; the
+  toast survives only for `missing` (frozen). The property editor's Rebind
+  button now acts as an explicit "bake current placement into the document".

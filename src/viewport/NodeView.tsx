@@ -14,6 +14,8 @@ import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import { Edges, TransformControls } from '@react-three/drei'
 import { useCadStore } from '../document/store'
+import { useResolvedStore } from '../document/resolvedStore'
+import { planeFromFace } from '../sketch/plane'
 import { useViewportStore } from './viewportStore'
 import { usePlaneBuilderStore } from './planeBuilderStore'
 import { nearestCoplanarBoundaryEdge, nearestTriangleVertex } from './edgePick'
@@ -93,6 +95,13 @@ export function NodeView({ id }: { id: NodeId }) {
   const vpTheme = VIEWPORT_THEMES[useResolvedTheme()]
   const smoothShading = usePrefsStore((s) => s.smoothShading)
   const geometry = useDerivedGeometry(id)
+  // A face-attached node that is auto-following its (moved) source face
+  // renders at the RESOLVED transform; the stored one stays the serialized
+  // snapshot. Exports apply the same override set, so screen == print.
+  const resolvedTransform = useResolvedStore((s) => {
+    const dep = s.dependents[id]
+    return dep?.status === 'moved' ? dep.nodeTransform : undefined
+  })
 
   // Picking mode (sketch plane / construction plane / measure / edge pick):
   // hover shows a targeted highlight instead of whole-object hover, and the
@@ -177,7 +186,8 @@ export function NodeView({ id }: { id: NodeId }) {
 
   if (!node || !node.visible || !geometry) return null
 
-  const rot = rotationDegToRadians(node.transform.rotationDeg)
+  const effectiveTransform = resolvedTransform ?? node.transform
+  const rot = rotationDegToRadians(effectiveTransform.rotationDeg)
 
   /**
    * Measure-tool auto-snap: classify the cursor as vertex / circle / edge /
@@ -257,15 +267,36 @@ export function NodeView({ id }: { id: NodeId }) {
     return positions ? { kind: 'face', positions } : null
   }
 
-  /** The picked face's plane in THIS node's local space (stale detection). */
+  /**
+   * The picked face's plane in THIS node's local space, plus the attached
+   * plane's full local FRAME (the same world frame `planeFromFace` derives
+   * for the sketch, expressed in local space). The frame lets the resolver
+   * track in-plane source motion that the plane equation cannot express.
+   */
   const faceRefAt = (e: ThreeEvent<MouseEvent>) => {
     if (!e.face) return undefined
     const localPoint = toLocal(e.point, e.object.matrixWorld)
     const n = e.face.normal // already geometry-local
+    const worldN = normalToWorld(n, e.object.matrixWorld)
+    const world = planeFromFace([e.point.x, e.point.y, e.point.z], [worldN.x, worldN.y, worldN.z])
+    const inv = new THREE.Matrix4().copy(e.object.matrixWorld).invert()
+    const lin = new THREE.Matrix3().setFromMatrix4(inv)
+    const nrm = new THREE.Matrix3().getNormalMatrix(inv)
+    const map = (v: Vec3, m: THREE.Matrix3): Vec3 => {
+      const w = new THREE.Vector3(...v).applyMatrix3(m)
+      return [w.x, w.y, w.z]
+    }
+    const origin = new THREE.Vector3(...world.origin).applyMatrix4(inv)
     return {
       nodeId: id,
       normal: [n.x, n.y, n.z] as Vec3,
       offset: n.x * localPoint.x + n.y * localPoint.y + n.z * localPoint.z,
+      frame: {
+        origin: [origin.x, origin.y, origin.z] as Vec3,
+        u: map(world.u, lin),
+        v: map(world.v, lin),
+        n: map(world.n, nrm),
+      },
     }
   }
 
@@ -481,9 +512,9 @@ export function NodeView({ id }: { id: NodeId }) {
       <mesh
         ref={setMeshObj}
         geometry={geometry}
-        position={node.transform.position}
+        position={effectiveTransform.position}
         rotation={[rot[0], rot[1], rot[2]]}
-        scale={node.transform.scale}
+        scale={effectiveTransform.scale}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
@@ -526,9 +557,9 @@ export function NodeView({ id }: { id: NodeId }) {
       {pick?.kind === 'face' && hoverGeometry && (
         <mesh
           geometry={hoverGeometry}
-          position={node.transform.position}
+          position={effectiveTransform.position}
           rotation={[rot[0], rot[1], rot[2]]}
-          scale={node.transform.scale}
+          scale={effectiveTransform.scale}
           raycast={() => null}
         >
           <meshBasicMaterial

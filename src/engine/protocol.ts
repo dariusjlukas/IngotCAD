@@ -8,7 +8,8 @@
  * asked to evaluate with an asset id it does not have (e.g. after a respawn),
  * and the client retries with those assets inlined.
  */
-import type { CadDocument, MeshAsset, NodeId, Vec2 } from '../document/types'
+import type { CadDocument, MeshAsset, NodeId, Transform, Vec2 } from '../document/types'
+import type { MeshQuality } from './quality'
 import type { RawMesh } from '../geometry/manifoldToThree'
 
 export interface WireDocument extends Omit<CadDocument, 'assets'> {
@@ -32,8 +33,17 @@ export interface EvalWarning {
 }
 
 export type EngineRequest =
-  | { id: number; method: 'computeMesh'; doc: WireDocument; nodeId: NodeId }
-  | { id: number; method: 'computeExportMesh'; doc: WireDocument; rootIds: NodeId[] }
+  /** `quality` defaults to 'full'; 'draft' evaluates with reduced tessellation. */
+  | { id: number; method: 'computeMesh'; doc: WireDocument; nodeId: NodeId; quality?: MeshQuality }
+  /** `overrides` replaces per-node transforms (resolved face-attachment
+   * placement), so exports match what the viewport renders. */
+  | {
+      id: number
+      method: 'computeExportMesh'
+      doc: WireDocument
+      rootIds: NodeId[]
+      overrides?: Record<NodeId, Transform>
+    }
   | { id: number; method: 'measure'; doc: WireDocument; nodeId: NodeId }
   | {
       id: number
@@ -41,6 +51,7 @@ export type EngineRequest =
       doc: WireDocument
       rootIds: NodeId[]
       invMatrix: number[]
+      overrides?: Record<NodeId, Transform>
     }
 
 export interface MeasureInfo {

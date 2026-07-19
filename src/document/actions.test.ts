@@ -1,5 +1,6 @@
 import { beforeEach, describe, it, expect } from 'vitest'
 import { useCadStore } from './store'
+import { setResolved } from './resolvedStore'
 import { hasChildren, IDENTITY_TRANSFORM } from './types'
 import type { SketchSource } from './types'
 
@@ -213,6 +214,67 @@ describe('setNodeTransform (scale baking)', () => {
     const t = store().doc.nodes[g].transform
     store().setNodeTransform(g, { ...t, scale: [2, 2, 2] })
     expect(store().doc.nodes[g].transform.scale).toEqual([2, 2, 2])
+  })
+})
+
+describe('face-attachment re-anchoring', () => {
+  it('setNodeTransform on a following node bakes the resolved plane in the same undo step', () => {
+    const plane = {
+      origin: [0, 0, 10] as [number, number, number],
+      u: [1, 0, 0] as [number, number, number],
+      v: [0, 1, 0] as [number, number, number],
+      n: [0, 0, 1] as [number, number, number],
+    }
+    const src = store().addPrimitive('box')
+    const ext = store().addExtrusion(
+      TRI,
+      5,
+      { ...IDENTITY_TRANSFORM, position: [0, 0, 10] },
+      false,
+      { ...SRC, plane, faceRef: { nodeId: src, normal: [0, 0, 1], offset: 10 } },
+    )!
+    // Simulate the monitor having resolved the source face 3mm higher.
+    const resolvedPlane = { ...plane, origin: [0, 0, 13] as [number, number, number] }
+    setResolved(
+      {
+        [ext]: {
+          key: ext,
+          kind: 'node',
+          label: 'ext',
+          status: 'moved',
+          plane: resolvedPlane,
+          nodeTransform: { ...IDENTITY_TRANSFORM, position: [0, 0, 13] },
+          local: { normal: [0, 0, 1], offset: 13 },
+        },
+      },
+      [],
+      store().doc.rootIds,
+    )
+
+    // A gizmo commit authored against the RESOLVED placement…
+    store().setNodeTransform(ext, { ...IDENTITY_TRANSFORM, position: [5, 0, 13] })
+
+    // …lands in the stored transform AND re-anchors the snapshot + faceRef,
+    // so the next resolve has delta = identity (no double application).
+    const node = store().doc.nodes[ext]
+    expect(node.transform.position).toEqual([5, 0, 13])
+    if (node.kind === 'primitive' && node.params.type === 'extrusion' && node.params.sketch) {
+      expect(node.params.sketch.plane.origin).toEqual([0, 0, 13])
+      expect(node.params.sketch.faceRef?.offset).toBe(13)
+      // The recomputed frame is in the SOURCE's local space.
+      const srcZ = store().doc.nodes[src].transform.position[2]
+      expect(node.params.sketch.faceRef?.frame?.origin[2]).toBeCloseTo(13 - srcZ, 6)
+    } else {
+      throw new Error('expected a sketch-backed extrusion')
+    }
+    // One undo step reverts both.
+    store().undo()
+    const back = store().doc.nodes[ext]
+    if (back.kind === 'primitive' && back.params.type === 'extrusion' && back.params.sketch) {
+      expect(back.transform.position).toEqual([0, 0, 10])
+      expect(back.params.sketch.plane.origin).toEqual([0, 0, 10])
+    }
+    setResolved({}, [], [])
   })
 })
 

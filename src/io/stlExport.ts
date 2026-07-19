@@ -5,6 +5,7 @@
 import * as THREE from 'three'
 import { STLExporter } from 'three/addons/exporters/STLExporter.js'
 import type { CadDocument } from '../document/types'
+import { currentRootOverrides } from '../document/resolvedStore'
 import { engine } from '../engine/engine'
 import { rawMeshToGeometry } from '../geometry/manifoldToThree'
 import { downloadBlob } from './download'
@@ -14,7 +15,8 @@ export async function exportStl(doc: CadDocument, filename = 'model.stl'): Promi
   const visibleRoots = doc.rootIds.filter((id) => doc.nodes[id]?.visible)
   if (visibleRoots.length === 0) return false
 
-  const raw = await engine.computeExportMesh(doc, visibleRoots)
+  // Resolved face-attachment placement, so the file matches the viewport.
+  const raw = await engine.computeExportMesh(doc, visibleRoots, currentRootOverrides())
   if (raw.index.length === 0) return false
 
   const geometry = rawMeshToGeometry(raw)

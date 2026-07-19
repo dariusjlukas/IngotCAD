@@ -1,59 +1,25 @@
 /**
- * Headless watcher for face-derived planes and face-attached sketches: when the
- * document changes, re-find each FaceRef's source face and flag dependents
- * whose stored snapshot no longer sits on it (moved or missing). Debounced so
- * gizmo releases and scrub edits don't thrash; results go to the transient
- * faceRefStatusStore — the document itself is never auto-rewritten.
+ * Headless associativity monitor: when the document changes, resolve every
+ * face-attached dependent against its source's current mesh (resolve.ts) and
+ * publish the result — resolved frames to resolvedStore (rendering + exports
+ * pick them up) and per-dependent statuses to faceRefStatusStore (badges,
+ * bake buttons, and a toast when an attachment loses its face). Debounced so
+ * gizmo releases and scrub edits don't thrash; the document itself is never
+ * auto-rewritten.
  */
 import { useEffect } from 'react'
 import * as THREE from 'three'
 import { useCadStore } from './store'
-import type { CadDocument, FaceRef, NodeId, Vec3 } from './types'
-import { composeFaceWorld, matchFaceRef, worldMatrixOf, worldPlanesAgree } from './faceRef'
+import type { CadDocument, NodeId } from './types'
+import { collectDependents, resolveDocument } from './resolve'
+import { setResolved } from './resolvedStore'
 import { setStaleFaceStatuses } from './faceRefStatusStore'
 import type { StaleFaceInfo } from './faceRefStatusStore'
-import { planarFaceGroups } from '../geometry/edges'
-import type { MeshArrays, PlanarFaceGroup } from '../geometry/edges'
+import type { MeshArrays } from '../geometry/edges'
 import { getMeshObject } from '../viewport/meshRegistry'
 import { engine } from '../engine/engine'
 
 const DEBOUNCE_MS = 150
-
-interface Dependent {
-  key: string
-  label: string
-  ref: FaceRef
-  /** Stored world snapshot the dependent renders from. */
-  snapshot: { normal: Vec3; origin: Vec3 }
-}
-
-function collectDependents(doc: CadDocument): Dependent[] {
-  const out: Dependent[] = []
-  for (const pid of doc.planeOrder) {
-    const plane = doc.planes[pid]
-    const def = plane?.definition
-    if (def?.kind === 'face' && def.source) {
-      out.push({
-        key: pid,
-        label: plane.name,
-        ref: def.source,
-        snapshot: { normal: def.normal, origin: def.origin },
-      })
-    }
-  }
-  for (const node of Object.values(doc.nodes)) {
-    if (node.kind !== 'primitive') continue
-    const p = node.params
-    if ((p.type !== 'extrusion' && p.type !== 'revolution') || !p.sketch?.faceRef) continue
-    out.push({
-      key: node.id,
-      label: node.name,
-      ref: p.sketch.faceRef,
-      snapshot: { normal: p.sketch.plane.n, origin: p.sketch.plane.origin },
-    })
-  }
-  return out
-}
 
 /** Local-space triangle arrays of the source node (rendered mesh, else engine). */
 async function sourceMeshArrays(doc: CadDocument, id: NodeId): Promise<MeshArrays | null> {
@@ -74,46 +40,46 @@ async function sourceMeshArrays(doc: CadDocument, id: NodeId): Promise<MeshArray
 
 async function check(doc: CadDocument): Promise<void> {
   const deps = collectDependents(doc)
-  const stale: Record<string, StaleFaceInfo> = {}
-  if (deps.length > 0) {
-    // Group by source so each source mesh is analyzed once.
-    const bySource = new Map<NodeId, Dependent[]>()
-    for (const d of deps) bySource.set(d.ref.nodeId, [...(bySource.get(d.ref.nodeId) ?? []), d])
+  if (deps.length === 0) {
+    if (useCadStore.getState().doc === doc) {
+      setResolved({}, [], doc.rootIds)
+      setStaleFaceStatuses({})
+    }
+    return
+  }
 
-    for (const [sourceId, group] of bySource) {
-      const src = doc.nodes[sourceId]
-      const mesh = src ? await sourceMeshArrays(doc, sourceId) : null
-      let groups: PlanarFaceGroup[] | null = null
-      if (mesh) groups = planarFaceGroups(mesh)
-      const world = src ? worldMatrixOf(doc, sourceId) : null
-      for (const dep of group) {
-        if (!src || !groups || !world) {
-          stale[dep.key] = { status: 'missing', label: dep.label }
-          continue
-        }
-        const match = matchFaceRef(dep.ref, groups)
-        if (match.status === 'missing') {
-          stale[dep.key] = { status: 'missing', label: dep.label }
-          continue
-        }
-        const expected = composeFaceWorld(world, match.local)
-        if (match.status === 'moved' || !worldPlanesAgree(expected, dep.snapshot)) {
-          stale[dep.key] = {
-            status: 'moved',
-            label: dep.label,
-            rebind: {
-              origin: expected.point,
-              normal: expected.normal,
-              localNormal: match.local.normal,
-              localOffset: match.local.offset,
-            },
-          }
-        }
+  // Fetch each source's mesh once (dependent nodes may be sources themselves).
+  const sourceIds = [...new Set(deps.map((d) => d.ref.nodeId))]
+  const meshes = new Map<NodeId, MeshArrays | null>()
+  for (const id of sourceIds) {
+    meshes.set(id, doc.nodes[id] ? await sourceMeshArrays(doc, id) : null)
+  }
+  // The doc may have changed while we awaited; only publish if still current.
+  if (useCadStore.getState().doc !== doc) return
+
+  const result = resolveDocument(doc, (id) => meshes.get(id) ?? null)
+  setResolved(result.dependents, result.cycles, doc.rootIds)
+
+  const stale: Record<string, StaleFaceInfo> = {}
+  for (const dep of Object.values(result.dependents)) {
+    if (dep.status === 'missing') {
+      stale[dep.key] = { status: 'missing', label: dep.label }
+    } else if (dep.status === 'moved' && dep.local) {
+      // Auto-followed: no toast, but expose the frame so the property editor
+      // can offer a one-click bake ("Rebind") into the document.
+      stale[dep.key] = {
+        status: 'moved',
+        label: dep.label,
+        rebind: {
+          origin: dep.plane.origin,
+          normal: dep.plane.n,
+          localNormal: dep.local.normal,
+          localOffset: dep.local.offset,
+        },
       }
     }
   }
-  // The doc may have changed while we awaited; only publish if still current.
-  if (useCadStore.getState().doc === doc) setStaleFaceStatuses(stale)
+  setStaleFaceStatuses(stale)
 }
 
 export function FaceRefMonitor() {

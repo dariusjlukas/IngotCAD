@@ -30,16 +30,14 @@ export const useFaceRefStatusStore = create<FaceRefStatusState>(() => ({
   stale: {},
 }))
 
-/** Replace all statuses; toasts once per newly-stale dependent. */
+/** Replace all statuses; toasts once per newly-LOST dependent. 'moved' entries
+ *  are auto-following (visible on screen) — they get a bake affordance in the
+ *  property editor, not a toast. */
 export function setStaleFaceStatuses(next: Record<string, StaleFaceInfo>): void {
   const prev = useFaceRefStatusStore.getState().stale
   for (const [key, info] of Object.entries(next)) {
-    if (!prev[key]) {
-      toast.info(
-        info.status === 'moved'
-          ? `"${info.label}" no longer sits on its source face.`
-          : `"${info.label}" lost its source face.`,
-      )
+    if (prev[key]?.status !== 'missing' && info.status === 'missing') {
+      toast.info(`"${info.label}" lost its source face.`)
     }
   }
   // Compare full payloads, not just statuses: after a source face moves a

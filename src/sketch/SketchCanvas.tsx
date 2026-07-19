@@ -27,6 +27,7 @@ import {
 } from './geometry'
 import { worldToLocalMatrix } from './plane'
 import { useCadStore } from '../document/store'
+import { currentRootOverrides } from '../document/resolvedStore'
 import { engine } from '../engine/engine'
 
 const CLOSE_DIST = 4
@@ -335,9 +336,11 @@ export function SketchCanvas() {
       return
     }
     let cancelled = false
-    engine.projectScene(cadDoc, roots, worldToLocalMatrix(plane)).then((p) => {
-      if (!cancelled) setProjection(p)
-    })
+    engine
+      .projectScene(cadDoc, roots, worldToLocalMatrix(plane), currentRootOverrides())
+      .then((p) => {
+        if (!cancelled) setProjection(p)
+      })
     return () => {
       cancelled = true
     }

@@ -12,6 +12,7 @@
 import { loadManifold } from './manifoldModule'
 import { computeExportRaw, computeMeshRaw, measureSolid, projectSceneRaw } from './evaluate'
 import { fromWireDocument, rawMeshTransferList } from './protocol'
+import { applyDraftQuality } from './quality'
 import type { EngineRequest, EngineResponse, EvalWarning } from './protocol'
 import type { ManifoldToplevel } from 'manifold-3d'
 import type { MeshAsset } from '../document/types'
@@ -70,11 +71,13 @@ self.onmessage = async (ev: MessageEvent<EngineRequest>) => {
   const warn = (w: EvalWarning) => warnings.push(w)
   try {
     switch (req.method) {
-      case 'computeMesh':
-        postMesh(req.id, computeMeshRaw(M, doc, req.nodeId, warn), warnings)
+      case 'computeMesh': {
+        const evalDoc = req.quality === 'draft' ? applyDraftQuality(doc) : doc
+        postMesh(req.id, computeMeshRaw(M, evalDoc, req.nodeId, warn), warnings)
         break
+      }
       case 'computeExportMesh':
-        postMesh(req.id, computeExportRaw(M, doc, req.rootIds, warn), warnings)
+        postMesh(req.id, computeExportRaw(M, doc, req.rootIds, warn, req.overrides), warnings)
         break
       case 'measure':
         post({ type: 'result', id: req.id, result: measureSolid(M, doc, req.nodeId), warnings })
@@ -83,7 +86,7 @@ self.onmessage = async (ev: MessageEvent<EngineRequest>) => {
         post({
           type: 'result',
           id: req.id,
-          result: projectSceneRaw(M, doc, req.rootIds, req.invMatrix),
+          result: projectSceneRaw(M, doc, req.rootIds, req.invMatrix, req.overrides),
           warnings,
         })
         break

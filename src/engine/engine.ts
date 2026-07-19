@@ -16,18 +16,29 @@ import { loadManifold } from './manifoldModule'
 import { computeExportRaw, computeMeshRaw, measureSolid, projectSceneRaw } from './evaluate'
 import { EngineWorkerClient } from './workerClient'
 import { setEvalWarnings } from './evalWarningsStore'
+import { applyDraftQuality } from './quality'
+import type { MeshQuality } from './quality'
 import type { EvalWarning } from './protocol'
 import { EMPTY_MESH } from '../geometry/manifoldToThree'
 import type { ManifoldToplevel } from 'manifold-3d'
-import type { CadDocument, NodeId, Vec2 } from '../document/types'
+import type { CadDocument, NodeId, Transform, Vec2 } from '../document/types'
 import type { RawMesh } from '../geometry/manifoldToThree'
 
 interface EngineBackend {
   ready: Promise<void>
-  computeMesh(doc: CadDocument, id: NodeId): Promise<RawMesh>
-  computeExportMesh(doc: CadDocument, rootIds: NodeId[]): Promise<RawMesh>
+  computeMesh(doc: CadDocument, id: NodeId, opts?: { quality?: MeshQuality }): Promise<RawMesh>
+  computeExportMesh(
+    doc: CadDocument,
+    rootIds: NodeId[],
+    overrides?: Record<NodeId, Transform>,
+  ): Promise<RawMesh>
   measure(doc: CadDocument, id: NodeId): Promise<{ triangles: number; volume: number }>
-  projectScene(doc: CadDocument, rootIds: NodeId[], invMatrix: number[]): Promise<Vec2[][][]>
+  projectScene(
+    doc: CadDocument,
+    rootIds: NodeId[],
+    invMatrix: number[],
+    overrides?: Record<NodeId, Transform>,
+  ): Promise<Vec2[][][]>
 }
 
 /** In-process backend: Manifold on the calling thread (tests / no-Worker envs). */
@@ -41,17 +52,26 @@ class LocalBackend implements EngineBackend {
     })
   }
 
-  async computeMesh(doc: CadDocument, id: NodeId): Promise<RawMesh> {
+  async computeMesh(
+    doc: CadDocument,
+    id: NodeId,
+    opts?: { quality?: MeshQuality },
+  ): Promise<RawMesh> {
     await this.ready
+    const evalDoc = opts?.quality === 'draft' ? applyDraftQuality(doc) : doc
     const warnings: EvalWarning[] = []
-    const raw = computeMeshRaw(this.module!, doc, id, (w) => warnings.push(w))
+    const raw = computeMeshRaw(this.module!, evalDoc, id, (w) => warnings.push(w))
     setEvalWarnings(id, warnings)
     return raw
   }
 
-  async computeExportMesh(doc: CadDocument, rootIds: NodeId[]): Promise<RawMesh> {
+  async computeExportMesh(
+    doc: CadDocument,
+    rootIds: NodeId[],
+    overrides?: Record<NodeId, Transform>,
+  ): Promise<RawMesh> {
     await this.ready
-    return computeExportRaw(this.module!, doc, rootIds)
+    return computeExportRaw(this.module!, doc, rootIds, undefined, overrides)
   }
 
   async measure(doc: CadDocument, id: NodeId): Promise<{ triangles: number; volume: number }> {
@@ -63,9 +83,10 @@ class LocalBackend implements EngineBackend {
     doc: CadDocument,
     rootIds: NodeId[],
     invMatrix: number[],
+    overrides?: Record<NodeId, Transform>,
   ): Promise<Vec2[][][]> {
     await this.ready
-    return projectSceneRaw(this.module!, doc, rootIds, invMatrix)
+    return projectSceneRaw(this.module!, doc, rootIds, invMatrix, overrides)
   }
 }
 
@@ -86,22 +107,37 @@ class Engine {
     return this.isReadyFlag
   }
 
-  /** Local-space geometry for rendering a root node (own transform NOT applied). */
-  async computeMesh(doc: CadDocument, id: NodeId): Promise<RawMesh> {
+  /**
+   * Local-space geometry for rendering a root node (own transform NOT applied).
+   * `quality: 'draft'` evaluates with reduced tessellation for interactive
+   * bursts; it must ONLY be used for viewport meshes — exports, measures, and
+   * projections always run at full quality.
+   */
+  async computeMesh(
+    doc: CadDocument,
+    id: NodeId,
+    opts?: { quality?: MeshQuality },
+  ): Promise<RawMesh> {
     await this.ready
     // Rendering callers historically never saw a rejection (evaluation errors
     // resolve to an empty mesh); preserve that for worker failures too.
-    return this.backend.computeMesh(doc, id).catch((err: unknown) => {
+    return this.backend.computeMesh(doc, id, opts).catch((err: unknown) => {
       console.error('computeMesh failed', err)
       return EMPTY_MESH
     })
   }
 
-  /** World-space union of the given roots, for export to STL/3MF. */
-  async computeExportMesh(doc: CadDocument, rootIds: NodeId[]): Promise<RawMesh> {
+  /** World-space union of the given roots, for export to STL/3MF. `overrides`
+   * carries the resolved placement of auto-following face-attached nodes so
+   * the exported part matches the viewport. */
+  async computeExportMesh(
+    doc: CadDocument,
+    rootIds: NodeId[],
+    overrides?: Record<NodeId, Transform>,
+  ): Promise<RawMesh> {
     await this.ready
     // Exports propagate errors — the file commands surface them as toasts.
-    return this.backend.computeExportMesh(doc, rootIds)
+    return this.backend.computeExportMesh(doc, rootIds, overrides)
   }
 
   /** Triangle count + volume (mm³) of a subtree, for the status bar. */
@@ -118,9 +154,10 @@ class Engine {
     doc: CadDocument,
     rootIds: NodeId[],
     invMatrix: number[],
+    overrides?: Record<NodeId, Transform>,
   ): Promise<Vec2[][][]> {
     await this.ready
-    return this.backend.projectScene(doc, rootIds, invMatrix).catch((err: unknown) => {
+    return this.backend.projectScene(doc, rootIds, invMatrix, overrides).catch((err: unknown) => {
       console.error('projectScene failed', err)
       return []
     })
