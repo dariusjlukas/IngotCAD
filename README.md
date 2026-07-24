@@ -105,20 +105,41 @@ your OS's native build dependencies (Xcode Command Line Tools on macOS; see the
 Linux).
 
 ```bash
-npm run tauri:dev     # run the desktop app with live reload
-npm run tauri:build   # build a native installer for the current OS
+npm run tauri:dev           # run the desktop app with live reload
+npm run tauri:build         # build a native installer for the current OS
+npm run tauri:build:linux   # same, with the Linux AppImage workarounds applied
 ```
 
 `tauri:build` runs the web build first, then compiles the Rust shell
 ([src-tauri/](src-tauri/)) and bundles a platform installer under
 `src-tauri/target/release/bundle/`. On macOS that's
 `dmg/Ingot_<version>_<arch>.dmg` (drag the app into Applications) plus a
-standalone `macos/Ingot.app`.
+standalone `macos/Ingot.app`. On Linux it's `deb/`, `rpm/`, and `appimage/`.
 
 The build is unsigned (no Apple Developer cert), so on macOS the first launch
 shows a Gatekeeper warning — **right-click the app → Open** once to allow it.
 Building in a headless/CI environment? Set `CI=true` so the macOS DMG skips the
 Finder-scripted window styling, which needs a GUI session.
+
+### Linux: use `tauri:build:linux` for the AppImage
+
+The `.deb` and `.rpm` bundles build fine with plain `tauri:build`, but the
+AppImage step (`linuxdeploy` + `appimagetool`) hits two problems on current
+distros and fails with `failed to bundle project 'failed to run linuxdeploy'`.
+`npm run tauri:build:linux` works around both:
+
+1. **Multilib contamination.** `linuxdeploy-plugin-gtk` deploys the GIO TLS
+   module with a `find /usr/lib*` glob. On distros where 32-bit libs live in
+   `/usr/lib` (Fedora, Arch, openSUSE), that matches the i686 `libgiognutls.so`
+   if any `*.i686` package is installed (Steam, Wine, …); linuxdeploy then pulls
+   its 32-bit dependencies into the AppDir and appimagetool refuses to package a
+   multi-architecture AppDir. [scripts/fix-linuxdeploy-gtk.sh](scripts/fix-linuxdeploy-gtk.sh)
+   patches the plugin in Tauri's `~/.cache/tauri` copy to search only the native
+   libdir. It's idempotent and re-downloads the plugin if the cache is empty.
+2. **`strip` is too old.** appimagetool ships an ancient binutils that can't read
+   the `.relr.dyn` sections modern glibc-based distros emit, so it aborts with
+   `unknown type [0x13] section '.relr.dyn'`. Setting `NO_STRIP=true` skips that
+   pass; distro libraries are already stripped, so the AppImage doesn't grow.
 
 ## Roadmap
 
